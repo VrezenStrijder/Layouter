@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -71,12 +71,12 @@ namespace Layouter.Plugins
 
                 if (result)
                 {
-                    MessageBox.Show("插件导入成功！", "成功", MessageBoxButton.OK, MessageBoxImage.Information);
+                    AppMessageBox.Show("插件导入成功！", "成功", MessageBoxButton.OK, MessageBoxImage.Information);
                     LoadPlugins();
                 }
                 else
                 {
-                    MessageBox.Show("插件导入失败，请检查插件文件是否有效。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    AppMessageBox.Show("插件导入失败，请检查插件文件是否有效。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
         }
@@ -96,7 +96,7 @@ namespace Layouter.Plugins
                 }
                 else
                 {
-                    MessageBox.Show("启用插件失败。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    AppMessageBox.Show("启用插件失败。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
         }
@@ -116,7 +116,7 @@ namespace Layouter.Plugins
                 }
                 else
                 {
-                    MessageBox.Show("禁用插件失败。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    AppMessageBox.Show("禁用插件失败。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
         }
@@ -128,7 +128,7 @@ namespace Layouter.Plugins
         {
             if (PluginsDataGrid.SelectedItem is PluginInfo selectedPlugin)
             {
-                MessageBoxResult result = MessageBox.Show(
+                MessageBoxResult result = AppMessageBox.Show(
                     $"确定要删除插件 {selectedPlugin.Name} 吗？此操作不可撤销。",
                     "确认删除",
                     MessageBoxButton.YesNo,
@@ -144,7 +144,7 @@ namespace Layouter.Plugins
                     }
                     else
                     {
-                        MessageBox.Show("删除插件失败。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                        AppMessageBox.Show("删除插件失败。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                     }
                 }
             }

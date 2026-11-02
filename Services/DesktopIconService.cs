@@ -360,53 +360,17 @@ namespace Layouter.Services
                     return true;
                 }
 
-                // 创建特殊的隐藏文件夹来存储隐藏的图标
-                string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
-                string hiddenFolderPath = Path.Combine(desktopPath, Env.HiddenFolderName);
-
-                // 确保隐藏文件夹存在
-                if (!Directory.Exists(hiddenFolderPath))
+                // 移入安全隐藏存储：桌面命名空间中不再留下任何隐藏目录，
+                // 存放名称使用哈希摘要，路径映射索引写入宿主文件的 ADS 数据流。
+                if (SecureHiddenStore.Instance.Hide(filePath, out string storedPath))
                 {
-                    // 创建隐藏文件夹
-                    Directory.CreateDirectory(hiddenFolderPath);
-
-                    // 设置文件夹为隐藏+系统属性，这样即使在"显示隐藏文件"开启时也不太容易被看到
-                    File.SetAttributes(hiddenFolderPath, FileAttributes.Hidden | FileAttributes.System | FileAttributes.Directory);
+                    Log.Information($"成功隐藏桌面图标: {filePath} -> {Path.GetFileName(storedPath)}");
+                    RefreshDesktop();
+                    return true;
                 }
 
-                // 获取文件名和扩展名
-                string fileName = isFile ? Path.GetFileName(filePath) : new DirectoryInfo(filePath).Name;
-
-                // 目标路径（隐藏文件夹中的文件路径）
-                string targetPath = Path.Combine(hiddenFolderPath, fileName);
-
-                // 创建记录文件位置的元数据文件，用于稍后恢复
-                string metadataPath = Path.Combine(hiddenFolderPath, $"{fileName}.meta");
-
-                //删除目标位置的同名文件(如果存在)
-                if (isFile && File.Exists(targetPath))
-                {
-                    File.Delete(targetPath);
-                }
-                else if (isFolder && Directory.Exists(targetPath))
-                {
-                    Directory.Delete(targetPath, true);
-                }
-
-                if (isFile)
-                {
-                    File.Move(filePath, targetPath);
-                }
-                else if (isFolder)
-                {
-                    Directory.Move(filePath, targetPath);
-                }
-
-                // 记录原始文件路径到元数据文件
-                File.WriteAllText(metadataPath, filePath);
-
-                Log.Information($"成功隐藏桌面图标: {filePath}");
-                return true;
+                Log.Information($"隐藏桌面图标失败: {filePath}");
+                return false;
             }
             catch (Exception ex)
             {
@@ -439,83 +403,102 @@ namespace Layouter.Services
                     return true;
                 }
 
-                // 获取文件名
+                // 从安全隐藏存储还原（filePath 可能是原始路径，也可能是存放路径）
+                if (SecureHiddenStore.Instance.Restore(filePath, out string restoredPath))
+                {
+                    Log.Information($"成功显示桌面图标: {restoredPath}");
+                    RefreshDesktop();
+                    return true;
+                }
+
+                // 兼容旧版桌面隐藏目录
+                if (RestoreFromLegacyFolder(filePath))
+                {
+                    RefreshDesktop();
+                    return true;
+                }
+
+                Log.Information($"未找到可还原的隐藏内容: {filePath}");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"显示桌面图标时出错: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 从旧版桌面隐藏目录（.layouterhidden）还原文件，用于兼容升级前的数据
+        /// </summary>
+        private bool RestoreFromLegacyFolder(string filePath)
+        {
+            try
+            {
                 string fileName = Path.GetFileName(filePath);
+                if (string.IsNullOrEmpty(fileName))
+                {
+                    return false;
+                }
 
-                // 获取隐藏文件夹路径
                 string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
-                string hiddenFolderPath = Path.Combine(desktopPath, Env.HiddenFolderName);
+                string legacyFolderPath = Path.Combine(desktopPath, Env.HiddenFolderName);
 
-                // 检查隐藏文件夹是否存在
-                if (!Directory.Exists(hiddenFolderPath))
+                if (!Directory.Exists(legacyFolderPath))
                 {
-                    Log.Information("隐藏文件夹不存在，无法恢复图标");
                     return false;
                 }
 
-                // 隐藏文件夹中的文件路径
-                string hiddenFilePath = Path.Combine(hiddenFolderPath, fileName);
-                string metadataPath = Path.Combine(hiddenFolderPath, $"{fileName}.meta");
+                string legacyFilePath = Path.Combine(legacyFolderPath, fileName);
+                string metadataPath = Path.Combine(legacyFolderPath, $"{fileName}.meta");
 
-                // 检查文件是否存在于隐藏文件夹中
-                if (!File.Exists(hiddenFilePath))
+                if (!File.Exists(legacyFilePath) && !Directory.Exists(legacyFilePath))
                 {
-                    //检查元数据文件
-                    if (File.Exists(metadataPath))
-                    {
-                        File.Delete(metadataPath);
-                    }
-                    Log.Information($"隐藏文件夹中不存在此文件: {fileName}");
                     return false;
                 }
 
-                // 检查原始路径是否存在于元数据文件中
                 string originalPath = RemoveHiddenPathInIconPath(filePath);
                 if (File.Exists(metadataPath))
                 {
-                    // 从元数据读取原始路径
-                    originalPath = File.ReadAllText(metadataPath);
+                    try
+                    {
+                        string recorded = File.ReadAllText(metadataPath).Trim();
+                        if (!string.IsNullOrEmpty(recorded))
+                        {
+                            originalPath = recorded;
+                        }
+                    }
+                    catch
+                    {
+                        // 保留默认路径
+                    }
                 }
 
-                // 如果目标位置已存在文件，我们不会覆盖它
-                if (File.Exists(originalPath))
+                if (File.Exists(originalPath) || Directory.Exists(originalPath))
                 {
                     Log.Information($"目标位置已存在文件: {originalPath}，无法恢复");
                     return false;
                 }
 
-                bool isFile = File.Exists(hiddenFilePath);
-                bool isFolder = Directory.Exists(hiddenFilePath);
-
-                // 移动文件到原位置
-                if (isFile)
+                if (File.Exists(legacyFilePath))
                 {
-                    File.Move(hiddenFilePath, originalPath);
+                    File.Move(legacyFilePath, originalPath);
                 }
-                else if (isFolder)
+                else if (Directory.Exists(legacyFilePath))
                 {
-                    Directory.Move(hiddenFilePath, originalPath);
+                    Directory.Move(legacyFilePath, originalPath);
                 }
 
-                // 清理空的隐藏文件夹
-                if (Directory.GetFiles(hiddenFolderPath).Length == 0)
+                if (File.Exists(metadataPath))
                 {
-                    try
-                    {
-                        Directory.Delete(hiddenFolderPath);
-                    }
-                    catch
-                    {
-                        // 忽略清理隐藏文件夹时的错误
-                    }
+                    File.Delete(metadataPath);
                 }
 
-                Log.Information($"成功显示桌面图标: {originalPath}");
                 return true;
             }
             catch (Exception ex)
             {
-                Log.Information($"显示桌面图标时出错: {ex.Message}");
+                Log.Information($"从旧版隐藏目录还原失败: {ex.Message}");
                 return false;
             }
         }
@@ -539,8 +522,24 @@ namespace Layouter.Services
         /// <summary>
         /// 移除路径中的隐藏目录标识
         /// </summary>
+        /// <remarks>
+        /// 对于存放在安全隐藏存储中的图标，返回其原始路径；
+        /// 对于旧版桌面隐藏目录，移除目录标识片段。
+        /// </remarks>
         public string RemoveHiddenPathInIconPath(string iconPath)
         {
+            if (string.IsNullOrEmpty(iconPath))
+            {
+                return iconPath;
+            }
+
+            var store = SecureHiddenStore.Instance;
+
+            if (store.IsStorePath(iconPath))
+            {
+                return store.ResolveOriginalPath(iconPath);
+            }
+
             if (iconPath.Contains(Env.HiddenFolderName))
             {
                 return iconPath.Replace($"{Env.HiddenFolderName}{Path.DirectorySeparatorChar}", "");
@@ -551,18 +550,35 @@ namespace Layouter.Services
         /// <summary>
         /// 为路径添加隐藏目录标识
         /// </summary>
+        /// <remarks>
+        /// 返回该文件在安全隐藏存储中的存放路径。隐藏操作是确定性的
+        /// （存放名称由原始路径的哈希推导），因此在隐藏之前即可得到正确结果。
+        /// </remarks>
         public string CombineHiddenPathWithIconPath(string filePath)
         {
-            if (filePath.Contains(Env.HiddenFolderName))
+            if (string.IsNullOrEmpty(filePath))
             {
                 return filePath;
             }
-            else
-            {
-                var fi = new FileInfo(filePath);
-                return filePath.Replace(fi.Name, $"{Env.HiddenFolderName}{Path.DirectorySeparatorChar}{fi.Name}");
 
+            var store = SecureHiddenStore.Instance;
+
+            if (store.IsStorePath(filePath))
+            {
+                return filePath;
             }
+
+            // 已经处于隐藏状态
+            string stored = store.ResolveStoredPath(filePath);
+            if (!string.Equals(stored, filePath, StringComparison.OrdinalIgnoreCase))
+            {
+                return stored;
+            }
+
+            bool isDirectory = Directory.Exists(filePath);
+            string predicted = store.GetStoredPath(filePath, isDirectory);
+
+            return string.IsNullOrEmpty(predicted) ? filePath : predicted;
         }
 
         /// <summary>
@@ -572,6 +588,32 @@ namespace Layouter.Services
         /// <returns></returns>
         public string GetAvailableIconPath(string iconPath)
         {
+            if (string.IsNullOrEmpty(iconPath))
+            {
+                return iconPath;
+            }
+
+            var store = SecureHiddenStore.Instance;
+
+            // 已经是安全存储中的存放路径
+            if (store.IsStorePath(iconPath))
+            {
+                return iconPath;
+            }
+
+            if (File.Exists(iconPath) || Directory.Exists(iconPath))
+            {
+                return iconPath;
+            }
+
+            // 原始路径不可见（已被隐藏）→ 解析到存放路径
+            string stored = store.ResolveStoredPath(iconPath);
+            if (!string.Equals(stored, iconPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return stored;
+            }
+
+            // 旧版隐藏目录兼容
             string purePath = string.Empty;
             string hiddenPath = string.Empty;
 

@@ -8,146 +8,220 @@
         xmlns:FluentIcons="clr-namespace:FluentIcons.Wpf;assembly=FluentIcons.Wpf"
         xmlns:converters="clr-namespace:Layouter.Utility"
         mc:Ignorable="d"
-        Title="分区管理" Height="500" Width="700" WindowStartupLocation="CenterScreen">
+        Title="分区管理" Height="620" Width="780" MinHeight="480" MinWidth="640"
+        WindowStartupLocation="CenterScreen">
 
     <Window.Resources>
-        <Style x:Key="HeaderTextBlockStyle" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="16"/>
-            <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="Margin" Value="0,10,0,5"/>
-        </Style>
-
-        <Style x:Key="SectionTextBlockStyle" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="14"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Margin" Value="0,10,0,5"/>
-        </Style>
-
-        <Style x:Key="ActionButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-            <Setter Property="Padding" Value="10,5"/>
-            <Setter Property="Margin" Value="5"/>
-            <Setter Property="MinWidth" Value="80"/>
-        </Style>
-
         <Style x:Key="CenteredCellStyle" TargetType="DataGridCell" BasedOn="{StaticResource {x:Type DataGridCell}}">
             <Setter Property="VerticalContentAlignment" Value="Center"/>
-            <Setter Property="Padding" Value="6,0"/>
-        </Style>
-
-        <Style x:Key="CenteredCheckBoxStyle" TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
-            <Setter Property="HorizontalAlignment" Value="Center"/>
-            <Setter Property="VerticalAlignment" Value="Center"/>
-            <Setter Property="VerticalContentAlignment" Value="Center"/>
-        </Style>
-
-        <Style x:Key="CenteredTextCellTextBlockStyle" TargetType="TextBlock">
-            <Setter Property="VerticalAlignment" Value="Center"/>
-            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
-        </Style>
-
-        <!-- 数据网格样式 -->
-        <Style x:Key="LightBorderDataGridStyle" TargetType="DataGrid">
-            <Setter Property="BorderBrush" Value="#E0E0E0"/>
-            <Setter Property="HorizontalGridLinesBrush" Value="#E0E0E0"/>
-            <Setter Property="VerticalGridLinesBrush" Value="#E0E0E0"/>
-            <Setter Property="RowBackground" Value="White"/>
-            <Setter Property="AlternatingRowBackground" Value="#F5F5F5"/>
-            <Setter Property="HeadersVisibility" Value="Column"/>
+            <Setter Property="Padding" Value="10,0"/>
         </Style>
     </Window.Resources>
 
-    <Grid Margin="15">
+    <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- 全局样式设置 -->
-        <GroupBox  Header="全局样式设置" Grid.Row="0">
-            <StackPanel  Margin="0,10,0,0">
-                <Grid Margin="0,5,0,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
+        <!-- ============ 页头 ============ -->
+        <Border Grid.Row="0"
+                Background="{StaticResource AppSurfaceBrush}"
+                BorderBrush="{StaticResource AppBorderBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="20,16">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
 
-                    <StackPanel>
-                        <CheckBox Content="启用全局样式（所有分区使用相同样式）" IsChecked="{Binding EnableGlobalStyle}" Margin="0,5"/>
-                        <TextBlock Text="全局样式将应用于所有分区窗口，新建的分区也将使用此样式。" Margin="20,0,0,5" TextWrapping="Wrap" Foreground="#666"/>
-                    </StackPanel>
+                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <TextBlock Text="分区管理" Style="{StaticResource AppPageTitleText}"/>
+                    <TextBlock Text="管理桌面分区的样式、显示状态与图标布局"
+                               Style="{StaticResource AppCaptionText}"
+                               Margin="0,4,0,0"/>
+                </StackPanel>
 
-                    <StackPanel Grid.Column="1" Orientation="Horizontal">
-                        <Button Content="编辑全局样式" Style="{StaticResource ActionButtonStyle}" Click="EditGlobalStyle_Click"/>
-                    </StackPanel>
-                </Grid>
-            </StackPanel>
-        </GroupBox>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Style="{StaticResource AppGhostButton}" Click="RefreshPartitions_Click" ToolTip="重新加载分区列表">
+                        <StackPanel Orientation="Horizontal">
+                            <FluentIcons:SymbolIcon Symbol="ArrowSync" FontSize="14" VerticalAlignment="Center"/>
+                            <TextBlock Text="刷新" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource AppGhostButton}" Click="BackupManager_Click" ToolTip="备份与还原配置">
+                        <StackPanel Orientation="Horizontal">
+                            <FluentIcons:SymbolIcon Symbol="Save" FontSize="14" VerticalAlignment="Center"/>
+                            <TextBlock Text="备份与还原" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource AppPrimaryButton}" Click="NewPartition_Click" ToolTip="新建一个分区">
+                        <StackPanel Orientation="Horizontal">
+                            <FluentIcons:SymbolIcon Symbol="Add" FontSize="14" VerticalAlignment="Center"/>
+                            <TextBlock Text="新建分区" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
 
-        <!-- 分区列表 -->
-        <Grid  Grid.Row="1">
+        <!-- ============ 内容 ============ -->
+        <Grid Grid.Row="1" Margin="20,16,20,0">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
-            <TextBlock Text="分区列表" Style="{StaticResource SectionTextBlockStyle}"/>
+            <!-- 全局样式卡片 -->
+            <Border Grid.Row="0" Style="{StaticResource AppCard}" Margin="0,0,0,16">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
 
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                        <CheckBox Content="启用全局样式（所有分区使用相同样式）"
+                                  IsChecked="{Binding EnableGlobalStyle}"/>
+                        <TextBlock Text="全局样式将应用于所有分区窗口，新建的分区也将使用此样式。"
+                                   Style="{StaticResource AppCaptionText}"
+                                   Margin="26,6,0,0"/>
+                    </StackPanel>
+
+                    <Button Grid.Column="1"
+                            Style="{StaticResource AppGhostButton}"
+                            Content="编辑全局样式"
+                            Click="EditGlobalStyle_Click"
+                            VerticalAlignment="Center"/>
+                </Grid>
+            </Border>
+
+            <!-- 分区列表 -->
             <Grid Grid.Row="1">
-                <DataGrid ItemsSource="{Binding Partitions}" AutoGenerateColumns="False"  CanUserAddRows="False" CanUserDeleteRows="False" SelectionMode="Extended"
-                          CellStyle="{StaticResource CenteredCellStyle}" RowHeight="40"
-                          SelectedItem="{Binding SelectedPartition}" Style="{StaticResource LightBorderDataGridStyle}" SelectionChanged="DataGrid_SelectionChanged">
-                    <DataGrid.Columns>
-                        <DataGridCheckBoxColumn Header="选择" Binding="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" Width="50"
-                                                ElementStyle="{StaticResource CenteredCheckBoxStyle}" EditingElementStyle="{StaticResource CenteredCheckBoxStyle}"/>
-                        <DataGridTextColumn Header="分区ID" Binding="{Binding PartitionId}" Width="200" IsReadOnly="True"
-                                            ElementStyle="{StaticResource CenteredTextCellTextBlockStyle}"/>
-                        <DataGridTextColumn Header="标题" Binding="{Binding Title}" Width="150" IsReadOnly="True"
-                                            ElementStyle="{StaticResource CenteredTextCellTextBlockStyle}"/>
-                        <DataGridCheckBoxColumn Header="显示" Binding="{Binding IsVisible, UpdateSourceTrigger=PropertyChanged}" Width="50"
-                                                ElementStyle="{StaticResource CenteredCheckBoxStyle}" EditingElementStyle="{StaticResource CenteredCheckBoxStyle}"/>
-                        <DataGridTemplateColumn Header="操作" Width="*">
-                            <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate>
-                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                        <Button Content="编辑" Margin="2" Padding="8,2" MinHeight="26" Click="EditPartition_Click"/>
-                                        <Button Content="{Binding IsVisible, Converter={StaticResource BoolToVisibilityTextConverter}}" 
-                                                Margin="2" Padding="8,2" MinHeight="26" Click="ToggleVisibility_Click"/>
-                                        <Button Content="删除" Margin="2" Padding="8,2" MinHeight="26" Click="DeletePartition_Click"/>
-                                    </StackPanel>
-                                </DataTemplate>
-                            </DataGridTemplateColumn.CellTemplate>
-                        </DataGridTemplateColumn>
-                    </DataGrid.Columns>
-                </DataGrid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
 
-                <Border Background="#F8FAFC" BorderBrush="#D8DEE9" BorderThickness="1" CornerRadius="6" Padding="18" HorizontalAlignment="Center" VerticalAlignment="Center">
-                    <Border.Style>
-                        <Style TargetType="Border">
-                            <Setter Property="Visibility" Value="Collapsed"/>
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding Partitions.Count}" Value="0">
-                                    <Setter Property="Visibility" Value="Visible"/>
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Border.Style>
-                    <TextBlock Text="当前没有任何分区。可以从托盘菜单或分区窗口中新建分区。" Foreground="#6B7280"/>
-                </Border>
+                <Grid Grid.Row="0" Margin="2,0,2,8">
+                    <TextBlock Text="分区列表" Style="{StaticResource AppSectionTitleText}" Margin="0,0,0,0"/>
+                    <TextBlock Text="{Binding Partitions.Count, StringFormat='共 {0} 个'}"
+                               HorizontalAlignment="Right"
+                               VerticalAlignment="Center"
+                               Style="{StaticResource AppCaptionText}"/>
+                </Grid>
+
+                <Grid Grid.Row="1">
+                    <DataGrid ItemsSource="{Binding Partitions}"
+                              AutoGenerateColumns="False"
+                              CanUserAddRows="False"
+                              CanUserDeleteRows="False"
+                              SelectionMode="Extended"
+                              CellStyle="{StaticResource CenteredCellStyle}"
+                              RowHeight="40"
+                              SelectedItem="{Binding SelectedPartition}"
+                              SelectionChanged="DataGrid_SelectionChanged">
+                        <DataGrid.Columns>
+                            <DataGridCheckBoxColumn Header="选择"
+                                                    Binding="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}"
+                                                    Width="52"
+                                                    ElementStyle="{StaticResource AppTableCellCheckBox}"
+                                                    EditingElementStyle="{StaticResource AppTableCellCheckBox}"/>
+                            <DataGridTextColumn Header="标题"
+                                                Binding="{Binding Title}"
+                                                Width="1.6*"
+                                                MinWidth="160"
+                                                IsReadOnly="True"
+                                                ElementStyle="{StaticResource AppTableCellText}"/>
+                            <DataGridTextColumn Header="分区ID"
+                                                Binding="{Binding PartitionId}"
+                                                Width="*"
+                                                MinWidth="180"
+                                                IsReadOnly="True"
+                                                ElementStyle="{StaticResource AppTableCellText}"/>
+                            <DataGridCheckBoxColumn Header="显示"
+                                                    Binding="{Binding IsVisible, UpdateSourceTrigger=PropertyChanged}"
+                                                    Width="52"
+                                                    ElementStyle="{StaticResource AppTableCellCheckBox}"
+                                                    EditingElementStyle="{StaticResource AppTableCellCheckBox}"/>
+                            <DataGridTemplateColumn Header="操作" Width="220">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Button Content="编辑"
+                                                    Style="{StaticResource AppTableActionButton}"
+                                                    Click="EditPartition_Click"/>
+                                            <Button Content="{Binding IsVisible, Converter={StaticResource BoolToVisibilityTextConverter}}"
+                                                    Style="{StaticResource AppTableActionButton}"
+                                                    Click="ToggleVisibility_Click"/>
+                                            <Button Content="删除"
+                                                    Style="{StaticResource AppTableDangerButton}"
+                                                    Click="DeletePartition_Click"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <!-- 空状态 -->
+                    <Border Background="{StaticResource AppSurfaceBrush}"
+                            BorderBrush="{StaticResource AppBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="10"
+                            Padding="28"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Partitions.Count}" Value="0">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <StackPanel>
+                            <FluentIcons:SymbolIcon Symbol="Grid"
+                                                  FontSize="36"
+                                                  HorizontalAlignment="Center"
+                                                  Foreground="{StaticResource AppBorderStrongBrush}"/>
+                            <TextBlock Text="当前没有任何分区"
+                                       HorizontalAlignment="Center"
+                                       Margin="0,12,0,0"
+                                       FontSize="15"
+                                       FontWeight="SemiBold"
+                                       Foreground="{StaticResource AppTextSecondaryBrush}"/>
+                            <TextBlock Text="点击右上角「新建分区」，或从托盘菜单创建。"
+                                       HorizontalAlignment="Center"
+                                       Margin="0,6,0,0"
+                                       Style="{StaticResource AppCaptionText}"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
             </Grid>
         </Grid>
 
-        <!-- 批量操作 -->
-        <StackPanel Grid.Row="2" Margin="0,5,0,0">
-            <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
-                <Button Content="{Binding AllSelected, Converter={StaticResource BoolToSelectionTextConverter}}" 
-                        Style="{StaticResource ActionButtonStyle}" Click="ToggleSelectAll_Click"/>
-                <Button Content="{Binding AnySelectedVisible, Converter={StaticResource BoolToVisibilityTextConverter}}" 
-                        Style="{StaticResource ActionButtonStyle}" Click="ToggleVisibilitySelected_Click"/>
-                <Button Content="批量删除" Style="{StaticResource ActionButtonStyle}" Click="DeleteSelected_Click"/>
+        <!-- ============ 底部操作栏 ============ -->
+        <Border Grid.Row="2"
+                Background="{StaticResource AppSurfaceBrush}"
+                BorderBrush="{StaticResource AppBorderBrush}"
+                BorderThickness="0,1,0,0"
+                Padding="20,12">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="{Binding AllSelected, Converter={StaticResource BoolToSelectionTextConverter}}"
+                        Style="{StaticResource AppGhostButton}"
+                        Click="ToggleSelectAll_Click"/>
+                <Button Content="{Binding AnySelectedVisible, Converter={StaticResource BoolToVisibilityTextConverter}}"
+                        Style="{StaticResource AppGhostButton}"
+                        Click="ToggleVisibilitySelected_Click"/>
+                <Button Content="批量删除"
+                        Style="{StaticResource AppDangerButton}"
+                        Click="DeleteSelected_Click"/>
             </StackPanel>
-        </StackPanel>
-
-
+        </Border>
     </Grid>
 </Window>

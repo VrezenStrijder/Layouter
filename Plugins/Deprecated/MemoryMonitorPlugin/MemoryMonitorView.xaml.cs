@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -143,12 +143,12 @@ namespace Layouter.Plugins.MemoryMonitorPlugin
                 // 更新内存信息
                 UpdateMemoryInfo(null);
 
-                MessageBox.Show("内存释放完成！", "成功", MessageBoxButton.OK, MessageBoxImage.Information);
+                AppMessageBox.Show("内存释放完成！", "成功", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
             {
                 Log.Information($"释放内存时出错: {ex.Message}");
-                MessageBox.Show($"释放内存时出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"释放内存时出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 

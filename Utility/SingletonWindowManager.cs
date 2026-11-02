@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -75,7 +75,7 @@ namespace Layouter.Utility
             catch (Exception ex)
             {
                 Log.Information($"打开窗口失败: {ex.Message}");
-                MessageBox.Show($"打开窗口失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"打开窗口失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
 
             return null;

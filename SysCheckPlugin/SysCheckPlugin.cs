@@ -12,7 +12,6 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using PluginEntry;
 using Layouter.Plugins.SysCheckPlugin;
-using Layouter.Plugins.Views;
 
 namespace Layouter.Plugins.SysCheckPlugin
 {
@@ -39,7 +38,7 @@ namespace Layouter.Plugins.SysCheckPlugin
                 cpuCounter = new PerformanceCounter("Processor", "% Processor Time", "Total");
                 ramCounter = new PerformanceCounter("Memory", "% Committed Bytes In Use");
                 swapCounter = new PerformanceCounter("Paging File", "% Usage", "Total");
-
+                
                 // 加载样式文件
                 string pluginPath = Path.GetDirectoryName(GetType().Assembly.Location);
                 string stylePath = Path.Combine(pluginPath, "style.json");
@@ -47,7 +46,7 @@ namespace Layouter.Plugins.SysCheckPlugin
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"初始化性能计数器或加载样式失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"初始化性能计数器或加载样式失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -83,24 +82,24 @@ namespace Layouter.Plugins.SysCheckPlugin
         {
             // 创建详细视图窗口模板
             detailedView = CreateDetailedViewTemplate();
-
+            
             // 添加资源项目（初始值为0）
             detailedView.AddResourceItem("CPU Usage", 0, Brushes.Green);
             detailedView.AddResourceItem("RAM Usage", 0, Brushes.Green);
             detailedView.AddResourceItem("SWAP Usage", 0, Brushes.Green);
-
+            
             // 应用样式
             if (pluginStyle != null)
             {
                 detailedView.ApplyStyle(pluginStyle);
             }
-
+            
             // 显示窗口
             detailedView.Show();
-
+            
             // 启动定时器更新数据
             StartMonitoring();
-
+            
             return null;
         }
 
@@ -178,7 +177,7 @@ namespace Layouter.Plugins.SysCheckPlugin
                         Brush cpuColor = GetColorByUsage(cpuUsage);
                         Brush ramColor = GetColorByUsage(ramUsage);
                         Brush swapColor = GetColorByUsage(swapUsage);
-
+                        
                         // 更新详细视图中的资源项
                         detailedView.UpdateResourceItem("CPU Usage", cpuUsage, cpuColor);
                         detailedView.UpdateResourceItem("RAM Usage", ramUsage, ramColor);
@@ -189,29 +188,29 @@ namespace Layouter.Plugins.SysCheckPlugin
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"更新资源使用率失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"更新资源使用率失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                 StopMonitoring();
-    }
-}
+            }
+        }
 
-private Brush GetColorByUsage(float value)
-{
-    int roundedValue = (int)Math.Round(value);
-
-    // 根据使用率设置颜色
-    if (roundedValue < 60)
-    {
-        return Brushes.Green;
-    }
-    else if (roundedValue < 80)
-    {
-        return Brushes.Orange;
-    }
-    else
-    {
-        return Brushes.Red;
-    }
-}
+        private Brush GetColorByUsage(float value)
+        {
+            int roundedValue = (int)Math.Round(value);
+            
+            // 根据使用率设置颜色
+            if (roundedValue < 60)
+            {
+                return Brushes.Green;
+            }
+            else if (roundedValue < 80)
+            {
+                return Brushes.Orange;
+            }
+            else
+            {
+                return Brushes.Red;
+            }
+        }
 
     }
 }

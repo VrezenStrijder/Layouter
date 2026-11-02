@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -86,9 +86,31 @@ namespace Layouter.Services
             trayMenu.Items.Add(partitionSettingsItem);
             menuItems["PartitionSettings"] = partitionSettingsItem;
 
-            // 自启动菜单项
+            // 备份与还原菜单项
+            var backupManagerItem = CreateMenuItem("备份与还原", IconUtil.CreateMenuItemIcon(FluentIcons.Common.Symbol.Save, Colors.DodgerBlue));
+            backupManagerItem.Click += (s, e) => ShowBackupManager();
+            trayMenu.Items.Add(backupManagerItem);
+            menuItems["BackupManager"] = backupManagerItem;
+
+            // 设置菜单项
+            var settingsMenuItem = CreateMenuItem("设置", IconUtil.CreateMenuItemIcon(FluentIcons.Common.Symbol.Settings, Colors.DodgerBlue));
+            trayMenu.Items.Add(settingsMenuItem);
+            menuItems["Settings"] = settingsMenuItem;
+
+            CreateSettingsMenuItems(settingsMenuItem);
+
+            // 添加分隔符
+            trayMenu.Items.Add(new Separator());
+        }
+
+        /// <summary>
+        /// 创建设置子菜单（自启动、双击桌面隐藏图标、全局分区设置）
+        /// </summary>
+        private void CreateSettingsMenuItems(MenuItem settingsMenuItem)
+        {
+            // 开机自启动菜单项
             var autoStartMenuItem = CreateMenuItem("开机自启动", IconUtil.CreateMenuItemIcon(FluentIcons.Common.Symbol.Power, Colors.DodgerBlue));
-            trayMenu.Items.Add(autoStartMenuItem);
+            settingsMenuItem.Items.Add(autoStartMenuItem);
             menuItems["AutoStart"] = autoStartMenuItem;
 
             // 自启动状态切换菜单项
@@ -99,13 +121,79 @@ namespace Layouter.Services
             autoStartMenuItem.Items.Add(autoStartToggleItem);
             menuItems["AutoStartToggle"] = autoStartToggleItem;
 
-            // 桌面双击菜单项
-            //var desktopEventMenuItem = CreateMenuItem("桌面双击事件");
-            //trayMenu.Items.Add(desktopEventMenuItem);
-            //menuItems["DesktopEvent"] = desktopEventMenuItem;
+            // 双击桌面隐藏桌面图标菜单项
+            var desktopToggleMenuItem = CreateMenuItem("双击桌面隐藏图标", IconUtil.CreateMenuItemIcon(FluentIcons.Common.Symbol.Eye, Colors.DodgerBlue));
+            settingsMenuItem.Items.Add(desktopToggleMenuItem);
+            menuItems["DesktopDoubleClickToggle"] = desktopToggleMenuItem;
 
-            // 添加分隔符
-            trayMenu.Items.Add(new Separator());
+            bool isDesktopToggleEnabled = GeneralSettingsService.Instance.GetEnableDesktopDoubleClickToggle();
+            var desktopToggleIcon = isDesktopToggleEnabled ? IconUtil.CreateMenuItemIcon(FluentIcons.Common.Symbol.Bookmark, Colors.DodgerBlue) : IconUtil.CreateMenuItemIcon(FluentIcons.Common.Symbol.BookmarkOff, Colors.DodgerBlue);
+            var desktopToggleItem = CreateMenuItem(isDesktopToggleEnabled ? "开启" : "停止", desktopToggleIcon);
+            desktopToggleItem.Click += (s, e) => ToggleDesktopDoubleClick(desktopToggleItem);
+            desktopToggleMenuItem.Items.Add(desktopToggleItem);
+            menuItems["DesktopDoubleClickToggleItem"] = desktopToggleItem;
+
+            // 全局分区设置菜单项
+            var globalSettingsItem = CreateMenuItem("全局分区设置", IconUtil.CreateMenuItemIcon(FluentIcons.Common.Symbol.PaintBrush, Colors.DodgerBlue));
+            globalSettingsItem.Click += (s, e) => ShowGlobalPartitionSettings();
+            settingsMenuItem.Items.Add(globalSettingsItem);
+            menuItems["GlobalPartitionSettings"] = globalSettingsItem;
+        }
+
+        /// <summary>
+        /// 切换「双击桌面隐藏图标」功能
+        /// </summary>
+        private void ToggleDesktopDoubleClick(MenuItem menuItem)
+        {
+            try
+            {
+                bool currentState = GeneralSettingsService.Instance.GetEnableDesktopDoubleClickToggle();
+                bool newState = !currentState;
+
+                GeneralSettingsService.Instance.SetEnableDesktopDoubleClickToggle(newState);
+
+                if (newState)
+                {
+                    DesktopService.Instance.RegisterDesktopDoubleClickEvent();
+                }
+                else
+                {
+                    DesktopService.Instance.UnregisterDesktopDoubleClickEvent();
+                }
+
+                // 更新菜单项文本与图标
+                menuItem.Header = newState ? "开启" : "停止";
+                menuItem.Icon = newState
+                    ? IconUtil.CreateMenuItemIcon(FluentIcons.Common.Symbol.Bookmark, Colors.DodgerBlue)
+                    : IconUtil.CreateMenuItemIcon(FluentIcons.Common.Symbol.BookmarkOff, Colors.DodgerBlue);
+
+                // 显示提示
+                string message = newState
+                    ? "已开启双击桌面隐藏图标，双击桌面空白处即可切换"
+                    : "已停止双击桌面隐藏图标";
+                TrayIconService.Instance.ShowBalloonTip("桌面双击设置", message, BalloonIcon.Info);
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"切换双击桌面隐藏图标失败: {ex.Message}");
+                TrayIconService.Instance.ShowBalloonTip("错误", $"设置失败: {ex.Message}", BalloonIcon.Error);
+            }
+        }
+
+        /// <summary>
+        /// 打开全局分区设置窗口
+        /// </summary>
+        private void ShowGlobalPartitionSettings()
+        {
+            try
+            {
+                PartitionManagerViewModel.ShowGlobalPartitionSettings();
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"打开全局分区设置失败: {ex.Message}");
+                AppMessageBox.Show($"打开全局分区设置失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         /// <summary>
@@ -268,7 +356,23 @@ namespace Layouter.Services
             catch (Exception ex)
             {
                 Log.Information($"显示插件管理窗口时出错: {ex.Message}");
-                MessageBox.Show($"显示插件管理窗口时出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"显示插件管理窗口时出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// 显示备份与还原窗口
+        /// </summary>
+        private void ShowBackupManager()
+        {
+            try
+            {
+                SingletonWindowManager.Instance.ShowWindow<BackupManagerWindow>(() => new BackupManagerWindow(), false);
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"显示备份与还原窗口时出错: {ex.Message}");
+                AppMessageBox.Show($"显示备份与还原窗口时出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -289,7 +393,7 @@ namespace Layouter.Services
             catch (Exception ex)
             {
                 Log.Information($"显示创建插件窗口时出错: {ex.Message}");
-                MessageBox.Show($"显示创建插件窗口时出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"显示创建插件窗口时出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
 
         }

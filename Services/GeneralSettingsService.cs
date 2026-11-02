@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -132,7 +132,7 @@ namespace Layouter.Services
             catch (Exception ex)
             {
                 Log.Information($"应用自启动设置失败: {ex.Message}");
-                MessageBox.Show($"设置开机自启动失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"设置开机自启动失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -246,6 +246,110 @@ namespace Layouter.Services
                 settings.PartitionVisibility.Remove(partitionId);
                 SaveSettings();
             }
+        }
+
+        /// <summary>
+        /// 获取配置备份的默认根目录
+        /// </summary>
+        public string GetBackupRootDirectory()
+        {
+            if (!string.IsNullOrWhiteSpace(settings.BackupRootDirectory))
+            {
+                return settings.BackupRootDirectory;
+            }
+
+            // 默认放在「文档」目录下，避免被系统清理或重装应用时一并删除
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                "LayouterBackups");
+        }
+
+        /// <summary>
+        /// 设置配置备份的默认根目录
+        /// </summary>
+        public void SetBackupRootDirectory(string directory)
+        {
+            string value = directory?.Trim() ?? string.Empty;
+            if (settings.BackupRootDirectory == value)
+            {
+                return;
+            }
+
+            settings.BackupRootDirectory = value;
+            SaveSettings();
+        }
+
+        /// <summary>
+        /// 获取隐藏存储目录
+        /// </summary>
+        public string GetHiddenStoreDirectory()
+        {
+            if (!string.IsNullOrWhiteSpace(settings.HiddenStoreDirectory))
+            {
+                return settings.HiddenStoreDirectory;
+            }
+
+            // 默认放在应用数据目录下，桌面将不再出现任何隐藏目录
+            return Path.Combine(settingsFolder, "HiddenStore");
+        }
+
+        /// <summary>
+        /// 设置隐藏存储目录
+        /// </summary>
+        public void SetHiddenStoreDirectory(string directory)
+        {
+            string value = directory?.Trim() ?? string.Empty;
+            if (settings.HiddenStoreDirectory == value)
+            {
+                return;
+            }
+
+            settings.HiddenStoreDirectory = value;
+            SaveSettings();
+        }
+
+        /// <summary>
+        /// 获取「双击桌面隐藏图标」功能是否启用
+        /// </summary>
+        public bool GetEnableDesktopDoubleClickToggle()
+        {
+            return settings.EnableDesktopDoubleClickToggle;
+        }
+
+        /// <summary>
+        /// 设置「双击桌面隐藏图标」功能是否启用
+        /// </summary>
+        public void SetEnableDesktopDoubleClickToggle(bool enabled)
+        {
+            if (settings.EnableDesktopDoubleClickToggle == enabled)
+            {
+                return;
+            }
+
+            settings.EnableDesktopDoubleClickToggle = enabled;
+            SaveSettings();
+        }
+
+        /// <summary>
+        /// 获取桌面图标当前是否处于隐藏状态
+        /// </summary>
+        public bool GetDesktopIconsHidden()
+        {
+            return settings.DesktopIconsHidden;
+        }
+
+        /// <summary>
+        /// 记录桌面图标当前是否处于隐藏状态
+        /// </summary>
+        public void SetDesktopIconsHidden(bool hidden)
+        {
+            if (settings.DesktopIconsHidden == hidden)
+            {
+                return;
+            }
+
+            settings.DesktopIconsHidden = hidden;
+            SaveSettings();
         }
     }
 

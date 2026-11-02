@@ -131,7 +131,9 @@ namespace Layouter.Views
             // 支持文件拖拽
             if (flag)
             {
-                e.Effects = DragDropEffects.Move;
+                // 必须包含 Copy：分区内部拖拽时 DoDragDrop 只声明了 Copy 权限，
+                // 若这里只给出 Move，WPF 会判定落点不被接受，光标显示为禁止拖放。
+                e.Effects = DragDropEffects.Copy | DragDropEffects.Move;
             }
             else
             {
@@ -534,7 +536,7 @@ namespace Layouter.Views
             SettingsPopup.IsOpen = false;
 
             // 确认是否删除
-            MessageBoxResult result = MessageBox.Show(
+            MessageBoxResult result = AppMessageBox.Show(
                 "确定要删除该分区吗？分区内的所有图标将会恢复到桌面。",
                 "删除确认",
                 MessageBoxButton.OKCancel,
@@ -569,6 +571,9 @@ namespace Layouter.Views
         private void LockButton_Click(object sender, RoutedEventArgs e)
         {
             vm.IsLocked = !vm.IsLocked;
+
+            AppToastService.Info(vm.IsLocked ? "分区已锁定" : "分区已解锁",
+                vm.IsLocked ? "锁定后无法拖动或调整分区大小" : "现在可以自由拖动分区");
         }
 
         private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -724,98 +729,39 @@ namespace Layouter.Views
                         var dataObject = new DataObject();
                         var originalIcon = draggedIcon;
 
-                        // 获取当前位置和窗口句柄,用于判断拖放结果
-                        Win32.POINT startPt;
-                        Win32.GetCursorPos(out startPt);
-                        IntPtr startWindowHandle = Win32.WindowFromPoint(startPt);
+                        // 图标实体当前位于「安全隐藏存储」中，存放名称是哈希摘要。
+                        // 拖拽时必须提供实体文件路径，桌面才能正常接收这次拖放。
+                        string storePath = originalIcon.IconPath;
 
-                        // 存储原始图标文件路径
-                        string originalFilePath = draggedIcon.IconPath;
-                        bool isShortcut = originalFilePath.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase);
+                        // 拖拽前临时解除存放实体的隐藏属性，
+                        // 否则资源管理器复制到桌面的副本会带上隐藏属性而看不见。
+                        bool hiddenAttributeCleared = ClearHiddenAttributes(storePath);
 
                         // 将图标路径添加为可拖放的文件 - 这是关键,桌面只接受FileDrop格式
-                        string[] files = new string[] { draggedIcon.IconPath };
+                        string[] files = new string[] { storePath };
                         dataObject.SetData(DataFormats.FileDrop, files);
 
                         // 同时添加我们自己的自定义数据
                         dataObject.SetData("DraggedIconSource", "Partition");
-                        dataObject.SetData("IconId", draggedIcon.Id);
-                        dataObject.SetData("IconName", draggedIcon.Name);
-                        dataObject.SetData("IconPath", draggedIcon.IconPath);
+                        dataObject.SetData("IconId", originalIcon.Id);
+                        dataObject.SetData("IconName", originalIcon.Name);
+                        dataObject.SetData("IconPath", storePath);
                         dataObject.SetData("SourceWindowHandle", new WindowInteropHelper(this).Handle);
 
                         // 开始拖放操作
-                        var result = DragDrop.DoDragDrop(this, dataObject, DragDropEffects.Copy | DragDropEffects.Move);
+                        // 仅使用 Copy：隐藏存储中的实体文件必须保留在原处，
+                        // 否则会被资源管理器「移动」走，导致存储索引失效。
+                        var result = DragDrop.DoDragDrop(this, dataObject, DragDropEffects.Copy);
 
-                        // 拖拽结束,获取结束位置
-                        Win32.POINT endPt;
-                        Win32.GetCursorPos(out endPt);
-                        IntPtr endWindowHandle = Win32.WindowFromPoint(endPt);
+                        // 拖拽结束，由「拖出方」统一判定落点并完成图标转移。
+                        // 之前由目标窗口自行接收，落点落在标题栏等非图标区域时
+                        // 目标窗口收不到 Drop 事件，图标就会被源窗口移除后直接丢失。
+                        HandleDragEnd(originalIcon, result);
 
-                        // 获取当前窗口句柄和区域
-                        IntPtr currentWindowHandle = new WindowInteropHelper(this).Handle;
-                        Win32.RECT currentWindowRect;
-                        Win32.GetWindowRect(currentWindowHandle, out currentWindowRect);
-
-                        // 判断是否拖放到了当前窗口外部
-                        bool isOutsideCurrentWindow =
-                            endPt.X < currentWindowRect.Left || endPt.X > currentWindowRect.Right ||
-                            endPt.Y < currentWindowRect.Top || endPt.Y > currentWindowRect.Bottom;
-
-                        // 检查是否拖放到了别的分区窗口
-                        bool isOnOtherPartition = false;
-                        DesktopManagerWindow targetWindow = null;
-                        foreach (var otherWindow in WindowManagerService.Instance.GetAllWindows())
+                        // 恢复存放实体的隐藏属性
+                        if (hiddenAttributeCleared)
                         {
-                            if (otherWindow == this)
-                            {
-                                continue;
-                            }
-                            IntPtr otherHandle = new WindowInteropHelper(otherWindow).Handle;
-                            if (endWindowHandle == otherHandle)
-                            {
-                                isOnOtherPartition = true;
-                                targetWindow = otherWindow;
-                                break;
-                            }
-                        }
-
-                        if (isOutsideCurrentWindow)
-                        {
-                            //图标移动到了其他分区窗口
-                            if (isOnOtherPartition && targetWindow != null)
-                            {
-                                Log.Information("图标可被移动到其他窗口");
-
-                                // 在目标分区窗口执行一次图标对齐操作
-                                Application.Current.Dispatcher.BeginInvoke(new Action(() =>
-                                {
-                                    var targetViewModel = targetWindow.DataContext as DesktopManagerViewModel;
-                                    targetViewModel?.ArrangeIcons();
-                                    Log.Information("已在目标分区执行图标对齐");
-                                }));
-                            }
-                            // 不在任何分区窗口,则认为是拖放到桌面
-                            else
-                            {
-                                Log.Information("图标可能被拖到桌面或其他应用");
-
-                                // 恢复桌面图标 - 从隐藏文件夹中复制回桌面
-                                bool restored = DesktopIconService.Instance.ShowDesktopIcon(originalFilePath);
-
-                                if (!restored)
-                                {
-                                    Log.Information($"警告：无法恢复桌面上的图标：{originalFilePath}");
-                                }
-                            }
-
-                            // 从分区中移除图标
-                            var viewModel = this.DataContext as DesktopManagerViewModel;
-                            if (viewModel != null)
-                            {
-                                viewModel.RemoveIcon(originalIcon);
-                                SavePartitionData();
-                            }
+                            RestoreHiddenAttributes(storePath);
                         }
 
                         // 无论如何都要重置状态
@@ -842,6 +788,437 @@ namespace Layouter.Views
             }
         }
 
+        #region 拖放落点处理
+
+        /// <summary>
+        /// 拖拽结束后由「拖出方」统一判定落点。
+        /// <para>
+        /// 之所以由拖出方处理而不是让目标窗口自己接收，是因为落点可能落在分区窗口的
+        /// 标题栏等非图标区域上，目标窗口此时根本收不到 Drop 事件；
+        /// 而旧实现会在拖出方无条件移除图标，结果就是跨分区拖动时图标直接丢失。
+        /// </para>
+        /// </summary>
+        private void HandleDragEnd(DesktopIcon icon, DragDropEffects result)
+        {
+            if (icon == null)
+            {
+                return;
+            }
+
+            try
+            {
+                Win32.POINT endPt;
+                Win32.GetCursorPos(out endPt);
+                IntPtr hitWindow = Win32.WindowFromPoint(endPt);
+                IntPtr rootWindow = Win32.GetAncestor(hitWindow, Win32.GA_ROOT);
+
+                IntPtr selfHandle = new WindowInteropHelper(this).Handle;
+                var screenPoint = new Point(endPt.X, endPt.Y);
+
+                // 1) 落在其它分区窗口 → 把图标转移过去
+                DesktopManagerWindow targetWindow = FindPartitionWindow(rootWindow);
+                if (targetWindow != null && !ReferenceEquals(targetWindow, this))
+                {
+                    if (targetWindow.TransferIconFrom(icon, screenPoint))
+                    {
+                        var viewModel = this.DataContext as DesktopManagerViewModel;
+                        viewModel?.RemoveIcon(icon);
+                        SavePartitionData();
+                        Log.Information("图标已转移到其它分区");
+                    }
+                    else
+                    {
+                        Log.Information("图标转移失败，仍保留在当前分区");
+                    }
+                    return;
+                }
+
+                // 2) 落在本分区 → 重新排序
+                if (rootWindow == selfHandle)
+                {
+                    ReorderIcon(icon, GetIconContainerPoint(screenPoint));
+                    return;
+                }
+
+                // 3) 落在桌面 → 还原到桌面，并保证桌面上显示的是原始名称
+                if (IsDesktopTarget(rootWindow))
+                {
+                    if (result == DragDropEffects.None)
+                    {
+                        Log.Information("桌面拒绝了此次拖放，图标仍保留在分区中");
+                        return;
+                    }
+
+                    RestoreIconToDesktop(icon);
+
+                    var viewModel = this.DataContext as DesktopManagerViewModel;
+                    viewModel?.RemoveIcon(icon);
+                    SavePartitionData();
+                    return;
+                }
+
+                // 4) 其它应用 → 保留在分区中，避免误删
+                Log.Information($"图标被拖放到其它应用（{result}），仍保留在当前分区");
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"处理拖放落点时出错: {ex.Message}\n{ex.StackTrace}");
+            }
+        }
+
+        /// <summary>
+        /// 根据顶层窗口句柄查找对应的分区窗口
+        /// </summary>
+        private DesktopManagerWindow FindPartitionWindow(IntPtr rootWindow)
+        {
+            if (rootWindow == IntPtr.Zero)
+            {
+                return null;
+            }
+
+            try
+            {
+                foreach (var window in WindowManagerService.Instance.GetAllWindows())
+                {
+                    if (window == null)
+                    {
+                        continue;
+                    }
+
+                    IntPtr handle = new WindowInteropHelper(window).Handle;
+                    if (handle != IntPtr.Zero && handle == rootWindow)
+                    {
+                        return window;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"查找分区窗口失败: {ex.Message}");
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// 判断窗口句柄是否属于桌面（Progman 及其子窗口）
+        /// </summary>
+        private static bool IsDesktopTarget(IntPtr rootWindow)
+        {
+            if (rootWindow == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            try
+            {
+                var builder = new StringBuilder(64);
+                if (Win32.GetClassName(rootWindow, builder, builder.Capacity) <= 0)
+                {
+                    return false;
+                }
+
+                return string.Equals(builder.ToString(), "Progman", StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"判断桌面落点失败: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 把屏幕坐标转换为图标容器内的坐标
+        /// </summary>
+        private Point GetIconContainerPoint(Point screenPoint)
+        {
+            try
+            {
+                if (iconsContainer != null && iconsContainer.IsVisible)
+                {
+                    return iconsContainer.PointFromScreen(screenPoint);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"转换图标落点坐标失败: {ex.Message}");
+            }
+
+            return PointFromScreen(screenPoint);
+        }
+
+        /// <summary>
+        /// 卡片内排序：把被拖动的图标移动到落点最近的图标位置
+        /// </summary>
+        private void ReorderIcon(DesktopIcon icon, Point dropPoint)
+        {
+            try
+            {
+                var viewModel = this.DataContext as DesktopManagerViewModel;
+                if (viewModel == null || icon == null)
+                {
+                    return;
+                }
+
+                int currentIndex = viewModel.Icons.IndexOf(icon);
+                if (currentIndex < 0)
+                {
+                    return;
+                }
+
+                int targetIndex = currentIndex;
+                double bestDistance = double.MaxValue;
+
+                for (int i = 0; i < viewModel.Icons.Count; i++)
+                {
+                    var other = viewModel.Icons[i];
+                    if (other == null || ReferenceEquals(other, icon))
+                    {
+                        continue;
+                    }
+
+                    double dx = dropPoint.X - other.Position.X;
+                    double dy = dropPoint.Y - other.Position.Y;
+                    double distance = dx * dx + dy * dy;
+
+                    if (distance < bestDistance)
+                    {
+                        bestDistance = distance;
+                        targetIndex = i;
+                    }
+                }
+
+                if (targetIndex != currentIndex)
+                {
+                    viewModel.Icons.Move(currentIndex, targetIndex);
+                    Log.Information($"图标已在卡片内重新排序：{currentIndex} → {targetIndex}");
+                }
+
+                viewModel.ArrangeIcons();
+                SavePartitionData();
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"卡片内排序失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 接收来自其它分区的图标
+        /// </summary>
+        /// <param name="icon">被拖动的图标</param>
+        /// <param name="screenPoint">落点（屏幕坐标）</param>
+        /// <returns>是否接收成功</returns>
+        public bool TransferIconFrom(DesktopIcon icon, Point screenPoint)
+        {
+            try
+            {
+                var viewModel = this.DataContext as DesktopManagerViewModel;
+                if (viewModel == null || icon == null)
+                {
+                    return false;
+                }
+
+                // 目标分区已经存在同一个图标时不再重复添加
+                if (viewModel.Icons.Any(i => i.IconPath != null
+                    && icon.IconPath != null
+                    && i.IconPath.Equals(icon.IconPath, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return false;
+                }
+
+                var moved = new DesktopIcon
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    Name = icon.Name,
+                    IconPath = icon.IconPath,
+                    IconType = icon.IconType,
+                    Size = viewModel.GetIconSize(),
+                    TextSize = viewModel.IconTextSize,
+                    Position = GetIconContainerPoint(screenPoint)
+                };
+
+                viewModel.AddIcon(moved);
+                viewModel.ArrangeIcons();
+                SavePartitionData();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"接收其它分区的图标失败: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 把图标还原到桌面，并保证桌面上显示的是原始名称
+        /// </summary>
+        private void RestoreIconToDesktop(DesktopIcon icon)
+        {
+            string storePath = icon?.IconPath;
+            if (string.IsNullOrEmpty(storePath))
+            {
+                return;
+            }
+
+            // 还原后应当使用的原始名称
+            string originalName = string.Empty;
+            try
+            {
+                string originalPath = DesktopIconService.Instance.RemoveHiddenPathInIconPath(storePath);
+                originalName = Path.GetFileName(originalPath);
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"解析图标原始名称失败: {ex.Message}");
+            }
+
+            bool isStorePath = SecureHiddenStore.Instance.IsStorePath(storePath);
+
+            // 1) 优先从安全隐藏存储还原，桌面上出现的是原始名称
+            bool restored = DesktopIconService.Instance.ShowDesktopIcon(storePath);
+
+            if (restored)
+            {
+                // 资源管理器复制到桌面的「哈希名」副本需要清理掉
+                CleanupStrayStoreCopy(storePath);
+                Log.Information($"图标已还原到桌面：{originalName}");
+                return;
+            }
+
+            if (!isStorePath)
+            {
+                Log.Information($"图标不在隐藏存储中，无需还原：{storePath}");
+                return;
+            }
+
+            // 2) 实体可能已被资源管理器「移动」到桌面（而不是复制），
+            //    此时桌面上残留的就是哈希名称的副本，直接改名回原始名称。
+            if (RenameStrayStoreCopy(storePath, originalName))
+            {
+                Log.Information($"桌面上的图标已重命名为原始名称：{originalName}");
+            }
+            else
+            {
+                Log.Information($"警告：无法恢复桌面上的图标：{storePath}");
+            }
+        }
+
+        /// <summary>
+        /// 把桌面上残留的「哈希名」副本改回原始名称
+        /// </summary>
+        /// <returns>是否改名成功</returns>
+        private static bool RenameStrayStoreCopy(string storedPath, string originalName)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(storedPath) || string.IsNullOrEmpty(originalName))
+                {
+                    return false;
+                }
+
+                string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+                string strayPath = Path.Combine(desktopPath, Path.GetFileName(storedPath));
+                string targetPath = Path.Combine(desktopPath, originalName);
+
+                bool strayIsFile = File.Exists(strayPath);
+                bool strayIsDirectory = Directory.Exists(strayPath);
+
+                if (!strayIsFile && !strayIsDirectory)
+                {
+                    return false;
+                }
+
+                // 原始名称已被占用时保持现状，避免覆盖用户文件
+                if (File.Exists(targetPath) || Directory.Exists(targetPath))
+                {
+                    Log.Information($"桌面已存在同名文件，未重命名：{originalName}");
+                    return false;
+                }
+
+                if (strayIsFile)
+                {
+                    File.Move(strayPath, targetPath);
+                }
+                else
+                {
+                    Directory.Move(strayPath, targetPath);
+                }
+
+                ClearHiddenAttributes(targetPath);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"重命名桌面副本失败: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 临时解除存放实体的隐藏属性（拖拽期间使用）
+        /// </summary>
+        /// <returns>是否成功解除</returns>
+        private static bool ClearHiddenAttributes(string path)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(path))
+                {
+                    return false;
+                }
+
+                if (!File.Exists(path) && !Directory.Exists(path))
+                {
+                    return false;
+                }
+
+                FileAttributes attributes = File.GetAttributes(path);
+                if ((attributes & (FileAttributes.Hidden | FileAttributes.System)) == 0)
+                {
+                    return false;
+                }
+
+                attributes &= ~(FileAttributes.Hidden | FileAttributes.System);
+                File.SetAttributes(path, attributes);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"解除隐藏属性失败: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 恢复存放实体的隐藏属性
+        /// </summary>
+        private static void RestoreHiddenAttributes(string path)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(path))
+                {
+                    return;
+                }
+
+                if (!File.Exists(path) && !Directory.Exists(path))
+                {
+                    return;
+                }
+
+                FileAttributes attributes = File.GetAttributes(path);
+                attributes |= FileAttributes.Hidden | FileAttributes.System;
+                File.SetAttributes(path, attributes);
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"恢复隐藏属性失败: {ex.Message}");
+            }
+        }
+
+        #endregion
+
         private void IconsContainer_Drop(object sender, DragEventArgs e)
         {
             try
@@ -862,6 +1239,14 @@ namespace Layouter.Views
 
                 // 判断是否是从另一个分区拖过来的图标(true:是,false:不是)
                 bool flag = data.GetDataPresent("DraggedIconSource") && (data.GetData("DraggedIconSource").ToString() == "Partition");
+
+                if (flag)
+                {
+                    // 来自其它分区的图标统一由「拖出方」处理：
+                    // 目标窗口只负责标记事件已处理，避免出现重复添加或图标丢失。
+                    e.Handled = true;
+                    return;
+                }
 
                 // 检查是否是从其他来源拖过来的文件
                 if (data.GetDataPresent(DataFormats.FileDrop))
@@ -1152,7 +1537,7 @@ namespace Layouter.Views
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"无法打开文件: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"无法打开文件: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -1168,7 +1553,7 @@ namespace Layouter.Views
                 if (contextMenu?.Tag is DesktopIcon icon)
                 {
                     // 确认是否删除
-                    MessageBoxResult result = MessageBox.Show(
+                    MessageBoxResult result = AppMessageBox.Show(
                         "确定要从分区中删除此图标吗？将会恢复桌面上对应的图标。",
                         "删除确认",
                         MessageBoxButton.YesNo,
@@ -1196,7 +1581,7 @@ namespace Layouter.Views
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"删除图标时出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"删除图标时出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -1217,7 +1602,7 @@ namespace Layouter.Views
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"无法查看属性: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"无法查看属性: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -1241,7 +1626,7 @@ namespace Layouter.Views
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"无法打开文件: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"无法打开文件: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -1457,6 +1842,53 @@ namespace Layouter.Views
 
             // 应用样式设置
             ApplyStyleSettings();
+        }
+
+        #endregion
+
+        #region 隐藏存储辅助
+
+        /// <summary>
+        /// 清理资源管理器在桌面留下的「存放路径」副本。
+        /// 存放路径使用哈希命名，正常情况下桌面不会出现该名称的文件，
+        /// 若存在则说明是本次拖放产生的临时副本，删除后只保留原始名称的文件。
+        /// </summary>
+        private static void CleanupStrayStoreCopy(string storedPath)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(storedPath))
+                {
+                    return;
+                }
+
+                if (!SecureHiddenStore.Instance.IsStorePath(storedPath))
+                {
+                    return;
+                }
+
+                string strayName = Path.GetFileName(storedPath);
+                if (string.IsNullOrEmpty(strayName))
+                {
+                    return;
+                }
+
+                string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+                string strayPath = Path.Combine(desktopPath, strayName);
+
+                if (File.Exists(strayPath))
+                {
+                    File.Delete(strayPath);
+                }
+                else if (Directory.Exists(strayPath))
+                {
+                    Directory.Delete(strayPath, true);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"清理拖放副本时出错: {ex.Message}");
+            }
         }
 
         #endregion

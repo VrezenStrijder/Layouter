@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
@@ -62,7 +62,7 @@ namespace Layouter.Plugins
             this.pluginManager.PluginCodeLoaded += PluginManager_PluginCodeLoaded;
             CreatePluginCommand = new RelayCommand(CreatePlugin);
 
-            PluginsListView.ItemsSource = pluginViewModels;
+            PluginsGrid.ItemsSource = pluginViewModels;
 
             this.DataContext = this;
         }
@@ -214,7 +214,7 @@ namespace Layouter.Plugins
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"导入插件出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    AppMessageBox.Show($"导入插件出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                     StatusBar.Text = "插件导入失败";
                 }
             }
@@ -254,7 +254,7 @@ namespace Layouter.Plugins
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"启用/禁用插件时出错：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    AppMessageBox.Show($"启用/禁用插件时出错：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
         }
@@ -415,14 +415,14 @@ namespace Layouter.Plugins
             {
                 if (!pluginManager.Plugins.TryGetValue(pluginId, out var plugin) || plugin == null)
                 {
-                    MessageBox.Show("未找到插件信息。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                    AppMessageBox.Show("未找到插件信息。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
                 var pluginDirectory = plugin.ManifestDirectory;
                 if (string.IsNullOrWhiteSpace(pluginDirectory) || !Directory.Exists(pluginDirectory))
                 {
-                    MessageBox.Show("未找到插件解压目录，请刷新插件列表后重试。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                    AppMessageBox.Show("未找到插件解压目录，请刷新插件列表后重试。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
@@ -441,7 +441,7 @@ namespace Layouter.Plugins
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"打开插件编辑器失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"打开插件编辑器失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -452,7 +452,7 @@ namespace Layouter.Plugins
                 var plugin = pluginManager.Plugins[pluginId];
                 if (plugin != null)
                 {
-                    var result = MessageBox.Show(
+                    var result = AppMessageBox.Show(
                         $"确定要删除插件 \"{plugin.Descriptor.Name}\" 吗？此操作不可撤销。",
                         "确认删除",
                         MessageBoxButton.YesNo,
@@ -470,7 +470,7 @@ namespace Layouter.Plugins
                         }
                         catch (Exception ex)
                         {
-                            MessageBox.Show($"删除插件时出错：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                            AppMessageBox.Show($"删除插件时出错：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                         }
                     }
                 }
@@ -517,7 +517,7 @@ namespace Layouter.Plugins
         //        string validationResult = codeEditor.ValidateCode(codeEditor.Code);
         //        if (!string.IsNullOrEmpty(validationResult))
         //        {
-        //            MessageBox.Show($"代码验证失败：\n{validationResult}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        //            AppMessageBox.Show($"代码验证失败：\n{validationResult}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
         //            return;
         //        }
 
@@ -538,7 +538,7 @@ namespace Layouter.Plugins
         //        catch (Exception ex)
         //        {
         //            // 如果解析失败,则使用默认值
-        //            MessageBox.Show($"解析插件描述失败：{ex.Message}\n将使用默认值。", "警告", MessageBoxButton.OK, MessageBoxImage.Warning);
+        //            AppMessageBox.Show($"解析插件描述失败：{ex.Message}\n将使用默认值。", "警告", MessageBoxButton.OK, MessageBoxImage.Warning);
 
         //            // 尝试从代码中提取类名
         //            var syntaxTree = CSharpSyntaxTree.ParseText(codeEditor.Code);
@@ -610,7 +610,7 @@ namespace Layouter.Plugins
         //    }
         //    catch (Exception ex)
         //    {
-        //        MessageBox.Show($"保存插件时出错：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        //        AppMessageBox.Show($"保存插件时出错：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
         //    }
         //}
     }

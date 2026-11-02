@@ -304,7 +304,7 @@ namespace Layouter.Plugins.Controls
             }
             catch (JsonException ex)
             {
-                MessageBox.Show($"解析插件描述JSON失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"解析插件描述JSON失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -355,11 +355,11 @@ namespace Layouter.Plugins.Controls
             string result = ValidateCode(aeEditor.Text);
             if (string.IsNullOrEmpty(result))
             {
-                MessageBox.Show("代码验证通过！", "验证结果", MessageBoxButton.OK, MessageBoxImage.Information);
+                AppMessageBox.Show("代码验证通过！", "验证结果", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             else
             {
-                MessageBox.Show($"代码验证失败：\n{result}", "验证结果", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"代码验证失败：\n{result}", "验证结果", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -401,7 +401,7 @@ namespace Layouter.Plugins.Controls
             }
             else
             {
-                MessageBox.Show($"代码验证失败，无法保存：\n{result}", "验证结果", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"代码验证失败，无法保存：\n{result}", "验证结果", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -467,7 +467,7 @@ namespace Layouter.Plugins.Controls
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"加载模板代码失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"加载模板代码失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -709,7 +709,7 @@ namespace Layouter.Plugins.Controls
         //    // 检查是否在根目录下添加文件
         //    if (parentItem == pluginFiles[0])
         //    {
-        //        MessageBox.Show("根目录下不能添加其他文件，请使用右键菜单添加特定目录后再添加文件", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+        //        AppMessageBox.Show("根目录下不能添加其他文件，请使用右键菜单添加特定目录后再添加文件", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
         //        return;
         //    }
 
@@ -737,7 +737,7 @@ namespace Layouter.Plugins.Controls
         //        // 验证文件名
         //        if (string.IsNullOrWhiteSpace(fileName))
         //        {
-        //            MessageBox.Show("文件名不能为空", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        //            AppMessageBox.Show("文件名不能为空", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
         //            return;
         //        }
 
@@ -746,12 +746,12 @@ namespace Layouter.Plugins.Controls
         //        if (parentItem.Name == "icons" && !(extension == ".png" || extension == ".jpg" || extension == ".jpeg" ||
         //            extension == ".gif" || extension == ".bmp" || extension == ".ico" || extension == ".svg"))
         //        {
-        //            MessageBox.Show("图标目录只能添加图片文件（.png, .jpg, .jpeg, .gif, .bmp, .ico, .svg）", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        //            AppMessageBox.Show("图标目录只能添加图片文件（.png, .jpg, .jpeg, .gif, .bmp, .ico, .svg）", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
         //            return;
         //        }
         //        else if (parentItem.Name == "libs" && extension != ".dll")
         //        {
-        //            MessageBox.Show("第三方库目录只能添加DLL文件（.dll）", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        //            AppMessageBox.Show("第三方库目录只能添加DLL文件（.dll）", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
         //            return;
         //        }
 
@@ -761,7 +761,7 @@ namespace Layouter.Plugins.Controls
         //        // 检查文件是否已存在
         //        if (fileContents.ContainsKey(fullPath))
         //        {
-        //            MessageBox.Show($"文件 '{fileName}' 已存在", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        //            AppMessageBox.Show($"文件 '{fileName}' 已存在", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
         //            return;
         //        }
 
@@ -803,7 +803,7 @@ namespace Layouter.Plugins.Controls
                 var existingStyleFile = rootItem.Children.FirstOrDefault(c => c.Name == "style.json" && !c.IsDirectory);
                 if (existingStyleFile != null)
                 {
-                    MessageBox.Show("样式文件已存在", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                    AppMessageBox.Show("样式文件已存在", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
@@ -866,12 +866,12 @@ namespace Layouter.Plugins.Controls
                     string mainFilePath = GetMainFilePath();
                     if (selectedItem.FullPath == mainFilePath)
                     {
-                        MessageBox.Show("不能删除主文件", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                        AppMessageBox.Show("不能删除主文件", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                         return;
                     }
 
                     // 确认删除文件
-                    if (MessageBox.Show($"确定要删除文件 '{selectedItem.Name}' 吗？", "确认删除", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+                    if (AppMessageBox.Show($"确定要删除文件 '{selectedItem.Name}' 吗？", "确认删除", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
                     {
                         // 从文件列表中移除
                         selectedItem.Parent.Children.Remove(selectedItem);
@@ -898,12 +898,12 @@ namespace Layouter.Plugins.Controls
                     // 不允许删除根目录
                     if (selectedItem == pluginFiles[0])
                     {
-                        MessageBox.Show("不能删除根目录", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                        AppMessageBox.Show("不能删除根目录", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                         return;
                     }
 
                     // 确认删除目录
-                    if (MessageBox.Show($"确定要删除文件夹 '{selectedItem.Name}' 及其所有内容吗？", "确认删除", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+                    if (AppMessageBox.Show($"确定要删除文件夹 '{selectedItem.Name}' 及其所有内容吗？", "确认删除", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
                     {
                         // 删除目录下的所有文件
                         DeleteDirectoryContents(selectedItem);
@@ -918,7 +918,7 @@ namespace Layouter.Plugins.Controls
             }
             else
             {
-                MessageBox.Show("请选择要删除的文件或文件夹", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                AppMessageBox.Show("请选择要删除的文件或文件夹", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
             }
         }
 
@@ -1037,7 +1037,7 @@ namespace Layouter.Plugins.Controls
             PluginFileItem parentItem = FileTreeView.SelectedItem as PluginFileItem;
             if (parentItem == null || !parentItem.IsDirectory || parentItem.Name != "icons")
             {
-                MessageBox.Show("请先选择图标目录", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                AppMessageBox.Show("请先选择图标目录", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -1063,7 +1063,7 @@ namespace Layouter.Plugins.Controls
                         // 检查文件是否已存在
                         if (fileContents.ContainsKey(fullPath))
                         {
-                            MessageBox.Show($"文件 '{fileName}' 已存在，将被跳过", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                            AppMessageBox.Show($"文件 '{fileName}' 已存在，将被跳过", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                             continue;
                         }
 
@@ -1087,7 +1087,7 @@ namespace Layouter.Plugins.Controls
                     }
                     catch (Exception ex)
                     {
-                        MessageBox.Show($"添加文件 '{Path.GetFileName(filePath)}' 失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                        AppMessageBox.Show($"添加文件 '{Path.GetFileName(filePath)}' 失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                     }
                 }
 
@@ -1103,7 +1103,7 @@ namespace Layouter.Plugins.Controls
             PluginFileItem parentItem = FileTreeView.SelectedItem as PluginFileItem;
             if (parentItem == null || !parentItem.IsDirectory || parentItem.Name != "libs")
             {
-                MessageBox.Show("请先选择第三方库目录", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                AppMessageBox.Show("请先选择第三方库目录", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -1128,7 +1128,7 @@ namespace Layouter.Plugins.Controls
                         // 检查文件是否已存在
                         if (fileContents.ContainsKey(fullPath))
                         {
-                            MessageBox.Show($"文件 '{fileName}' 已存在，将被跳过", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                            AppMessageBox.Show($"文件 '{fileName}' 已存在，将被跳过", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                             continue;
                         }
 
@@ -1152,7 +1152,7 @@ namespace Layouter.Plugins.Controls
                     }
                     catch (Exception ex)
                     {
-                        MessageBox.Show($"添加文件 '{Path.GetFileName(filePath)}' 失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                        AppMessageBox.Show($"添加文件 '{Path.GetFileName(filePath)}' 失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                     }
                 }
 
@@ -1171,7 +1171,7 @@ namespace Layouter.Plugins.Controls
                 // 确保路径存在
                 if (string.IsNullOrEmpty(folderPath))
                 {
-                    MessageBox.Show("保存路径无效", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    AppMessageBox.Show("保存路径无效", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                     return;
                 }
 
@@ -1194,7 +1194,7 @@ namespace Layouter.Plugins.Controls
 
                 if (!string.IsNullOrEmpty(validationResult))
                 {
-                    MessageBox.Show($"代码验证失败：\n{validationResult}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    AppMessageBox.Show($"代码验证失败：\n{validationResult}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                     return;
                 }
 
@@ -1304,7 +1304,7 @@ namespace Layouter.Plugins.Controls
                 // 创建ZIP文件
                 ZipFile.CreateFromDirectory(folderPath, zipFilePath);
 
-                if (MessageBox.Show($"已成功生成插件,是否打开文件所在目录?", "保存成功", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
+                if (AppMessageBox.Show($"已成功生成插件,是否打开文件所在目录?", "保存成功", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
                 {
                     string directoryPath = Path.GetDirectoryName(zipFilePath);
                     if (!string.IsNullOrEmpty(directoryPath) && Directory.Exists(directoryPath))
@@ -1315,7 +1315,7 @@ namespace Layouter.Plugins.Controls
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"保存插件失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"保存插件失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -1361,7 +1361,7 @@ namespace Layouter.Plugins.Controls
         //        }
         //        catch (Exception ex)
         //        {
-        //            MessageBox.Show($"导入文件失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        //            AppMessageBox.Show($"导入文件失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
         //        }
         //    }
         //}
@@ -1388,7 +1388,7 @@ namespace Layouter.Plugins.Controls
         //        }
         //        catch (Exception ex)
         //        {
-        //            MessageBox.Show($"导入文件失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        //            AppMessageBox.Show($"导入文件失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
         //        }
         //    }
 
@@ -1535,7 +1535,7 @@ namespace Layouter.Plugins.Controls
             var existingFolder = rootItem.Children.FirstOrDefault(f => f.Name == "icons" && f.IsDirectory);
             if (existingFolder != null)
             {
-                MessageBox.Show("图标目录已存在", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                AppMessageBox.Show("图标目录已存在", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -1551,7 +1551,7 @@ namespace Layouter.Plugins.Controls
 
             rootItem.Children.Add(folderItem);
             RefreshFileTree();
-            MessageBox.Show("图标目录已创建，此目录仅支持添加图片文件", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            AppMessageBox.Show("图标目录已创建，此目录仅支持添加图片文件", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
         private void AddLibsFolder_Click(object sender, RoutedEventArgs e)
@@ -1561,7 +1561,7 @@ namespace Layouter.Plugins.Controls
             var existingFolder = rootItem.Children.FirstOrDefault(f => f.Name == "libs" && f.IsDirectory);
             if (existingFolder != null)
             {
-                MessageBox.Show("第三方库目录已存在", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                AppMessageBox.Show("第三方库目录已存在", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -1577,7 +1577,7 @@ namespace Layouter.Plugins.Controls
 
             rootItem.Children.Add(folderItem);
             RefreshFileTree();
-            MessageBox.Show("第三方库目录已创建，此目录仅支持添加dll文件", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            AppMessageBox.Show("第三方库目录已创建，此目录仅支持添加dll文件", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
         private void UpdateMainFileNameInTree(string oldClassName, string newClassName)
@@ -1626,7 +1626,7 @@ namespace Layouter.Plugins.Controls
                 string mainFilePath = GetMainFilePath();
                 if (!selectedItem.IsDirectory && selectedItem.FullPath == mainFilePath)
                 {
-                    MessageBox.Show("不能重命名主文件", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    AppMessageBox.Show("不能重命名主文件", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                     return;
                 }
 
@@ -1639,7 +1639,7 @@ namespace Layouter.Plugins.Controls
                     // 验证名称
                     if (string.IsNullOrWhiteSpace(newName))
                     {
-                        MessageBox.Show("名称不能为空", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                        AppMessageBox.Show("名称不能为空", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                         return;
                     }
 
@@ -1647,7 +1647,7 @@ namespace Layouter.Plugins.Controls
                     var existingItem = selectedItem.Parent.Children.FirstOrDefault(f => f.Name == newName);
                     if (existingItem != null && existingItem != selectedItem)
                     {
-                        MessageBox.Show($"'{newName}' 已存在", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                        AppMessageBox.Show($"'{newName}' 已存在", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                         return;
                     }
 

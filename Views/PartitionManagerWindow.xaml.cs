@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -61,7 +61,7 @@ namespace Layouter.Views
             var button = (Button)sender;
             var partition = (PartitionItemViewModel)button.DataContext;
 
-            if (MessageBox.Show($"确定要删除分区 \"{partition.Title}\" 吗？此操作不可恢复。", "确认删除",
+            if (AppMessageBox.Show($"确定要删除分区 \"{partition.Title}\" 吗？此操作不可恢复。", "确认删除",
                 MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
             {
                 vm.DeletePartition(partition);
@@ -84,11 +84,11 @@ namespace Layouter.Views
 
             if (count == 0)
             {
-                MessageBox.Show("请先选择要删除的分区。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                AppMessageBox.Show("请先选择要删除的分区。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
-            if (MessageBox.Show($"确定要删除选中的 {count} 个分区吗？此操作不可恢复。", "确认删除",
+            if (AppMessageBox.Show($"确定要删除选中的 {count} 个分区吗？此操作不可恢复。", "确认删除",
                 MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
             {
                 vm.DeleteSelected();
@@ -98,6 +98,63 @@ namespace Layouter.Views
         private void EditGlobalStyle_Click(object sender, RoutedEventArgs e)
         {
             vm.EditGlobalStyle();
+        }
+
+        /// <summary>
+        /// 打开备份与还原窗口
+        /// </summary>
+        private void BackupManager_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                SingletonWindowManager.Instance.ShowWindow<BackupManagerWindow>(() => new BackupManagerWindow(), false);
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"打开备份与还原窗口时出错: {ex.Message}");
+                AppMessageBox.Show($"打开备份与还原窗口时出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// 新建分区
+        /// </summary>
+        private void NewPartition_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var window = new DesktopManagerWindow();
+                PartitionDataService.Instance.ShowWindow(window);
+
+                // 让新分区直接进入标题编辑状态，便于立即命名
+                window.Dispatcher.BeginInvoke(new Action(() => window.EnableTitleEditOnFirstLoad()));
+
+                // 立即落盘并刷新列表，保证新分区马上出现在列表中
+                PartitionDataService.Instance.SaveAllPartitions();
+                vm.LoadPartitions();
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"创建新分区窗口时出错: {ex.Message}");
+                AppMessageBox.Show($"创建新分区失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// 刷新分区列表
+        /// </summary>
+        private void RefreshPartitions_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                PartitionDataService.Instance.SaveAllPartitions();
+                vm.LoadPartitions();
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"刷新分区列表时出错: {ex.Message}");
+                AppMessageBox.Show($"刷新分区列表失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
     }

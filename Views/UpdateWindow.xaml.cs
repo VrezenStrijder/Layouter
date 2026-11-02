@@ -30,7 +30,8 @@ namespace Layouter.Views
             CurrentVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString();
             string updateUrl = Env.UpdateUrl;
             string releasePageUrl = Env.ReleasePageUrl;
-            vm = new UpdateWindowViewModel(CurrentVersion, updateUrl, releasePageUrl);
+            string releaseApiUrl = Env.ReleaseApiUrl;
+            vm = new UpdateWindowViewModel(CurrentVersion, updateUrl, releasePageUrl, releaseApiUrl);
 
             DataContext = vm;
         }

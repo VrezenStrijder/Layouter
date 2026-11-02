@@ -4,123 +4,240 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:Layouter.Views"
+        xmlns:FluentIcons="clr-namespace:FluentIcons.Wpf;assembly=FluentIcons.Wpf"
         mc:Ignorable="d"
-        Title="软件更新" Height="450" Width="600" 
+        Title="软件更新" Height="600" Width="660"
         WindowStartupLocation="CenterScreen" ResizeMode="NoResize">
-    <Window.Resources>
-        <!-- 按钮样式 -->
-        <Style x:Key="ModernButton" TargetType="Button">
-            <Setter Property="Background" Value="#2196F3"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="Padding" Value="15,8"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}" 
-                                CornerRadius="4" 
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="#1976D2"/>
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter Property="Background" Value="#0D47A1"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
 
-        <!-- 超链接样式 -->
+    <Window.Resources>
         <Style x:Key="HyperlinkStyle" TargetType="Hyperlink">
-            <Setter Property="Foreground" Value="#2196F3"/>
+            <Setter Property="Foreground" Value="{StaticResource AppAccentBrush}"/>
             <Setter Property="TextDecorations" Value="None"/>
+            <Setter Property="Cursor" Value="Hand"/>
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Foreground" Value="#1976D2"/>
+                    <Setter Property="Foreground" Value="{StaticResource AppAccentHoverBrush}"/>
                     <Setter Property="TextDecorations" Value="Underline"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
+
+        <Style x:Key="VersionCardStyle" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource AppSubtleSurfaceBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="{StaticResource AppCornerRadius}"/>
+            <Setter Property="Padding" Value="14"/>
+            <Setter Property="Margin" Value="0,0,0,10"/>
+        </Style>
+
+        <!-- 版本信息中的「标签 + 内容」行 -->
+        <Style x:Key="VersionMetaRow" TargetType="StackPanel">
+            <Setter Property="Orientation" Value="Horizontal"/>
+            <Setter Property="Margin" Value="0,6,0,0"/>
+        </Style>
+
+        <!-- 更新说明正文：保留换行，便于阅读发布说明 -->
+        <Style x:Key="ReleaseNotesText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="{StaticResource AppFontSizeBody}"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="LineHeight" Value="20"/>
+            <Setter Property="Foreground" Value="{StaticResource AppTextSecondaryBrush}"/>
+            <Setter Property="Margin" Value="0,4,0,0"/>
+        </Style>
     </Window.Resources>
 
-    <Grid Margin="20">
+    <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- 标题 -->
-        <StackPanel Grid.Row="0" Margin="0,0,0,20">
-            <TextBlock Text="软件更新" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,10"/>
-            <TextBlock TextWrapping="Wrap">
-                <Run Text="当前版本: "/>
-                <Run Text="{Binding CurrentVersion}" FontWeight="Bold"/>
-                <Hyperlink x:Name="OpenReleasePage" Style="{StaticResource HyperlinkStyle}" Click="OpenReleasePage_Click">
-                    <TextBlock Text="查看软件发布页面" Margin="10,0"/>
-                </Hyperlink>
-            </TextBlock>
+        <!-- ============ 页头 ============ -->
+        <Border Grid.Row="0"
+                Background="{StaticResource AppSurfaceBrush}"
+                BorderBrush="{StaticResource AppBorderBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="20,16">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
 
-        </StackPanel>
+                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <TextBlock Text="软件更新" Style="{StaticResource AppPageTitleText}"/>
+                    <TextBlock Margin="0,6,0,0">
+                        <Run Text="当前版本: " Foreground="{StaticResource AppMutedTextBrush}"/>
+                        <Run Text="{Binding CurrentVersion}" FontWeight="SemiBold"/>
+                        <Hyperlink x:Name="OpenReleasePage"
+                                   Style="{StaticResource HyperlinkStyle}"
+                                   Click="OpenReleasePage_Click">
+                            <TextBlock Text="查看发布页面" Margin="12,0,0,0"/>
+                        </Hyperlink>
+                    </TextBlock>
+                </StackPanel>
 
-        <!-- 检测按钮 -->
-        <Button x:Name="CheckNewVersion" Grid.Row="1"  Content="检测新版本" Click="CheckNewVersion_Click"
-                Style="{StaticResource ModernButton}" HorizontalAlignment="Left" Margin="0,0,0,20"/>
-
-        <!-- 检测状态 -->
-        <TextBlock Grid.Row="2" 
-                   Text="{Binding StatusMessage}"
-                   Margin="0,0,0,10"/>
-
-        <!-- 版本列表 -->
-        <Border Grid.Row="3" 
-                BorderBrush="#E0E0E0" 
-                BorderThickness="1" 
-                Padding="10"
-                Visibility="{Binding VersionsVisibility}">
-            <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <ItemsControl x:Name="VersionList" ItemsSource="{Binding AvailableVersions}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <Grid Margin="0,5">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
-                                <TextBlock Grid.Row="0">
-                                    <Run Text="版本 " />
-                                    <Run Text="{Binding LatestVersion}" FontWeight="Bold"/>
-                                    <Run Text=" - "/>
-                                    <Run Text="{Binding ReleaseDate}"/>
-                                </TextBlock>
-                                <TextBlock Grid.Row="1" TextWrapping="Wrap" Text="{Binding Description}" Margin="0"/>
-                                <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,2,0,8" >
-                                    <RadioButton x:Name="rbVersionA" IsChecked="True" Content="框架依赖版本" GroupName="Options" Tag="1"  Margin="10,0"/>
-                                    <RadioButton x:Name="rbVersionB" IsChecked="False" Content="独立安装版本" GroupName="Options" Tag="2" />
-                                </StackPanel>
-                                <Button x:Name="Download" Grid.Row="3"  Content="下载并安装" Click="Download_Click"
-                                        Style="{StaticResource ModernButton}" HorizontalAlignment="Left" Margin="3"/>
-                            </Grid>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </ScrollViewer>
+                <Button x:Name="CheckNewVersion"
+                        Grid.Column="1"
+                        Style="{StaticResource AppPrimaryButton}"
+                        VerticalAlignment="Center"
+                        Click="CheckNewVersion_Click">
+                    <StackPanel Orientation="Horizontal">
+                        <FluentIcons:SymbolIcon Symbol="ArrowSync" FontSize="14" VerticalAlignment="Center"/>
+                        <TextBlock Text="检测新版本" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+            </Grid>
         </Border>
 
-        <!-- 下载进度 -->
-        <StackPanel Grid.Row="4" Margin="0,10,0,0" Visibility="{Binding ProgressVisibility}">
-            <TextBlock Text="{Binding ProgressMessage}" Margin="0,0,0,5"/>
-            <ProgressBar Height="20" Value="{Binding DownloadProgress}" Maximum="100"/>
-        </StackPanel>
-    </Grid>
+        <!-- ============ 内容 ============ -->
+        <Grid Grid.Row="1" Margin="20,16,20,0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
 
+            <!-- 状态 -->
+            <Border Grid.Row="0"
+                    Background="{StaticResource AppAccentSoftBrush}"
+                    BorderBrush="{StaticResource AppAccentBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="{StaticResource AppCornerRadius}"
+                    Padding="12,8"
+                    Margin="0,0,0,12">
+                <TextBlock Text="{Binding StatusMessage}"
+                           Foreground="{StaticResource AppAccentBrush}"
+                           TextWrapping="Wrap"/>
+            </Border>
+
+            <!-- 版本信息 -->
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <!-- 当前版本 -->
+                    <Border Style="{StaticResource VersionCardStyle}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" Text="当前版本" Style="{StaticResource AppSectionTitleText}"/>
+
+                            <StackPanel Grid.Row="1" Style="{StaticResource VersionMetaRow}">
+                                <TextBlock Foreground="{StaticResource AppMutedTextBrush}" Text="版本"/>
+                                <TextBlock Text="{Binding CurrentVersionInfo.LatestVersion}"
+                                           FontWeight="SemiBold"
+                                           Margin="8,0,0,0"/>
+                                <TextBlock Text="·"
+                                           Foreground="{StaticResource AppMutedTextBrush}"
+                                           Margin="10,0,0,0"/>
+                                <TextBlock Text="发布日期"
+                                           Foreground="{StaticResource AppMutedTextBrush}"/>
+                                <TextBlock Text="{Binding CurrentVersionInfo.ReleaseDate}"
+                                           Margin="8,0,0,0"/>
+                            </StackPanel>
+
+                            <TextBlock Grid.Row="2"
+                                       Text="版本更新说明"
+                                       Foreground="{StaticResource AppMutedTextBrush}"
+                                       Margin="0,14,0,0"/>
+
+                            <TextBlock Grid.Row="3"
+                                       Text="{Binding CurrentVersionInfo.Description}"
+                                       Style="{StaticResource ReleaseNotesText}"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- 最新版本（仅在检测到新版本时显示） -->
+                    <Border Style="{StaticResource VersionCardStyle}"
+                            Visibility="{Binding LatestVersionInfo, Converter={StaticResource NullToVisibilityConverter}}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <Grid Grid.Row="0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="最新版本" Style="{StaticResource AppSectionTitleText}"/>
+                                <Border Grid.Column="1"
+                                        Background="{StaticResource AppSuccessSoftBrush}"
+                                        BorderBrush="{StaticResource AppSuccessBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="{StaticResource AppCornerRadiusSmall}"
+                                        Padding="8,2"
+                                        VerticalAlignment="Center">
+                                    <TextBlock Text="可更新"
+                                               Foreground="{StaticResource AppSuccessBrush}"
+                                               FontSize="12"
+                                               FontWeight="SemiBold"/>
+                                </Border>
+                            </Grid>
+
+                            <StackPanel Grid.Row="1" Style="{StaticResource VersionMetaRow}">
+                                <TextBlock Foreground="{StaticResource AppMutedTextBrush}" Text="版本"/>
+                                <TextBlock Text="{Binding LatestVersionInfo.LatestVersion}"
+                                           FontWeight="SemiBold"
+                                           Margin="8,0,0,0"/>
+                                <TextBlock Text="·"
+                                           Foreground="{StaticResource AppMutedTextBrush}"
+                                           Margin="10,0,0,0"/>
+                                <TextBlock Text="发布日期"
+                                           Foreground="{StaticResource AppMutedTextBrush}"/>
+                                <TextBlock Text="{Binding LatestVersionInfo.ReleaseDate}"
+                                           Margin="8,0,0,0"/>
+                            </StackPanel>
+
+                            <TextBlock Grid.Row="2"
+                                       Text="版本更新说明"
+                                       Foreground="{StaticResource AppMutedTextBrush}"
+                                       Margin="0,14,0,0"/>
+
+                            <TextBlock Grid.Row="3"
+                                       Text="{Binding LatestVersionInfo.Description}"
+                                       Style="{StaticResource ReleaseNotesText}"/>
+
+                            <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,14,0,0">
+                                <RadioButton x:Name="rbVersionA" IsChecked="True"
+                                             Content="框架依赖版本" GroupName="Options" Tag="1" Margin="0,0,16,0"/>
+                                <RadioButton x:Name="rbVersionB" IsChecked="False"
+                                             Content="独立安装版本" GroupName="Options" Tag="2"/>
+                            </StackPanel>
+
+                            <Button x:Name="Download" Grid.Row="5"
+                                    Content="下载并安装"
+                                    Style="{StaticResource AppPrimaryButton}"
+                                    HorizontalAlignment="Left"
+                                    Margin="0,12,0,0"
+                                    Click="Download_Click"/>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <!-- ============ 下载进度 ============ -->
+        <Border Grid.Row="2"
+                Background="{StaticResource AppSurfaceBrush}"
+                BorderBrush="{StaticResource AppBorderBrush}"
+                BorderThickness="0,1,0,0"
+                Padding="20,12"
+                Visibility="{Binding ProgressVisibility}">
+            <StackPanel>
+                <TextBlock Text="{Binding ProgressMessage}" Margin="0,0,0,8" Style="{StaticResource AppBodyText}"/>
+                <ProgressBar Height="8" Value="{Binding DownloadProgress}" Maximum="100"/>
+            </StackPanel>
+        </Border>
+    </Grid>
 </Window>

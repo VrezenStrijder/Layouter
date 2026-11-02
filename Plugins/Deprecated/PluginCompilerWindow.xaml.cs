@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -52,7 +52,7 @@ namespace Layouter.Plugins
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"读取源文件时出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    AppMessageBox.Show($"读取源文件时出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
         }
@@ -79,14 +79,14 @@ namespace Layouter.Plugins
                 // 检查源代码
                 if (string.IsNullOrWhiteSpace(SourceCodeTextBox.Text))
                 {
-                    MessageBox.Show("请输入或加载源代码", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    AppMessageBox.Show("请输入或加载源代码", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                     return;
                 }
 
                 // 检查输出文件
                 if (string.IsNullOrWhiteSpace(OutputFileTextBox.Text))
                 {
-                    MessageBox.Show("请指定输出文件", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    AppMessageBox.Show("请指定输出文件", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                     return;
                 }
 
@@ -105,32 +105,32 @@ namespace Layouter.Plugins
 
                 if (result)
                 {
-                    MessageBox.Show("插件编译成功！", "成功", MessageBoxButton.OK, MessageBoxImage.Information);
+                    AppMessageBox.Show("插件编译成功！", "成功", MessageBoxButton.OK, MessageBoxImage.Information);
 
                     // 询问是否加载插件
-                    MessageBoxResult loadResult = MessageBox.Show("是否立即加载编译好的插件？", "加载插件", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                    MessageBoxResult loadResult = AppMessageBox.Show("是否立即加载编译好的插件？", "加载插件", MessageBoxButton.YesNo, MessageBoxImage.Question);
                     if (loadResult == MessageBoxResult.Yes)
                     {
                         bool loadSuccess = Plugins.PluginManager.Instance.LoadPlugin(OutputFileTextBox.Text);
                         if (loadSuccess)
                         {
-                            MessageBox.Show("插件加载成功！", "成功", MessageBoxButton.OK, MessageBoxImage.Information);
+                            AppMessageBox.Show("插件加载成功！", "成功", MessageBoxButton.OK, MessageBoxImage.Information);
                         }
                         else
                         {
-                            MessageBox.Show("插件加载失败，请检查插件是否实现了IPlugin接口。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                            AppMessageBox.Show("插件加载失败，请检查插件是否实现了IPlugin接口。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                         }
                     }
                 }
                 else
                 {
-                    MessageBox.Show("插件编译失败，请检查源代码。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    AppMessageBox.Show("插件编译失败，请检查源代码。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
             catch (Exception ex)
             {
                 Log.Information($"编译插件时出错: {ex.Message}");
-                MessageBox.Show($"编译插件时出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"编译插件时出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 

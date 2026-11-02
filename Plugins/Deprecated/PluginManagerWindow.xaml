@@ -21,11 +21,17 @@
         <DataGrid Grid.Row="1" x:Name="PluginsDataGrid" AutoGenerateColumns="False" IsReadOnly="True" 
                   SelectionMode="Single" SelectionChanged="PluginsDataGrid_SelectionChanged">
             <DataGrid.Columns>
-                <DataGridCheckBoxColumn Header="启用" Binding="{Binding IsEnabled}" Width="50"/>
-                <DataGridTextColumn Header="名称" Binding="{Binding Name}" Width="120"/>
-                <DataGridTextColumn Header="版本" Binding="{Binding Version}" Width="80"/>
-                <DataGridTextColumn Header="作者" Binding="{Binding Author}" Width="100"/>
-                <DataGridTextColumn Header="描述" Binding="{Binding Description}" Width="*"/>
+                <DataGridCheckBoxColumn Header="启用" Binding="{Binding IsEnabled}" Width="50"
+                                        ElementStyle="{StaticResource AppTableCellCheckBox}"
+                                        EditingElementStyle="{StaticResource AppTableCellCheckBox}"/>
+                <DataGridTextColumn Header="名称" Binding="{Binding Name}" Width="120"
+                                    ElementStyle="{StaticResource AppTableCellText}"/>
+                <DataGridTextColumn Header="版本" Binding="{Binding Version}" Width="80"
+                                    ElementStyle="{StaticResource AppTableCellText}"/>
+                <DataGridTextColumn Header="作者" Binding="{Binding Author}" Width="100"
+                                    ElementStyle="{StaticResource AppTableCellText}"/>
+                <DataGridTextColumn Header="描述" Binding="{Binding Description}" Width="*"
+                                    ElementStyle="{StaticResource AppTableCellText}"/>
             </DataGrid.Columns>
         </DataGrid>
 

@@ -152,7 +152,7 @@ namespace Layouter.Plugins
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"加载插件样式失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"加载插件样式失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
 
             return detailedWindow;
@@ -275,7 +275,7 @@ namespace Layouter.Plugins
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"解析样式文件失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"解析样式文件失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
 
             return null;
@@ -323,7 +323,7 @@ namespace Layouter.Plugins
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"加载插件样式失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"加载插件样式失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
 
             return floatingWindow;
@@ -393,7 +393,7 @@ namespace Layouter.Plugins
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"执行功能失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"执行功能失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -511,7 +511,7 @@ namespace Layouter.Plugins
                         }
                         catch (Exception ex)
                         {
-                            MessageBox.Show($"执行功能失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                            AppMessageBox.Show($"执行功能失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                         }
                     };
                     buttonPanel.Children.Add(button);

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
@@ -133,19 +133,20 @@ namespace Layouter.ViewModels
                     bool isVisible = GeneralSettingsService.Instance.GetPartitionVisibility(windowId);
                     // 加载分区设置
                     var settings = PartitionSettingsService.Instance.LoadWindowSettings(windowId);
-                    //加载分区数据
+                    // 加载分区数据（新建分区尚未落盘时数据文件可能缺失，此时仍需在列表中显示）
                     var partitionData = PartitionDataService.Instance.GetPartitionData(windowId);
                     if (partitionData == null)
                     {
-                        Log.Information($"跳过缺少数据文件的分区: {windowId}");
-                        continue;
+                        Log.Information($"分区尚未生成数据文件，使用默认名称显示: {windowId}");
                     }
 
                     // 创建分区项视图模型
                     var partitionItem = new PartitionItemViewModel
                     {
                         PartitionId = windowId,
-                        Title = string.IsNullOrWhiteSpace(partitionData.Name) ? "未命名分区" : partitionData.Name,
+                        Title = partitionData == null || string.IsNullOrWhiteSpace(partitionData.Name)
+                            ? "未命名分区"
+                            : partitionData.Name,
                         IsVisible = isVisible,
                         IsLocked = settings?.IsLocked ?? false,
                         IsSelected = false
@@ -175,7 +176,7 @@ namespace Layouter.ViewModels
             catch (Exception ex)
             {
                 Log.Information($"加载分区数据失败: {ex.Message}");
-                MessageBox.Show($"加载分区数据失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"加载分区数据失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -253,7 +254,7 @@ namespace Layouter.ViewModels
             catch (Exception ex)
             {
                 Log.Information($"编辑分区失败: {ex.Message}");
-                MessageBox.Show($"编辑分区失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"编辑分区失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -274,7 +275,7 @@ namespace Layouter.ViewModels
             catch (Exception ex)
             {
                 Log.Information($"切换分区可见性失败: {ex.Message}");
-                MessageBox.Show($"切换分区可见性失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"切换分区可见性失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -303,7 +304,7 @@ namespace Layouter.ViewModels
             catch (Exception ex)
             {
                 Log.Information($"删除分区失败: {ex.Message}");
-                MessageBox.Show($"删除分区失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"删除分区失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -333,7 +334,7 @@ namespace Layouter.ViewModels
 
                 if (selectedPartitions.Count == 0)
                 {
-                    MessageBox.Show("请先选择要操作的分区。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                    AppMessageBox.Show("请先选择要操作的分区。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
@@ -350,7 +351,7 @@ namespace Layouter.ViewModels
             catch (Exception ex)
             {
                 Log.Information($"切换选中分区可见性失败: {ex.Message}");
-                MessageBox.Show($"切换选中分区可见性失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"切换选中分区可见性失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -365,7 +366,7 @@ namespace Layouter.ViewModels
 
                 if (selectedPartitions.Count == 0)
                 {
-                    MessageBox.Show("请先选择要删除的分区。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                    AppMessageBox.Show("请先选择要删除的分区。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
@@ -383,11 +384,14 @@ namespace Layouter.ViewModels
                     }
                     Partitions.Remove(partition);
                 }
+
+                UpdateSelectionState();
+                AppToastService.Success("删除完成", $"已删除 {selectedPartitions.Count} 个分区");
             }
             catch (Exception ex)
             {
                 Log.Information($"批量删除分区失败: {ex.Message}");
-                MessageBox.Show($"批量删除分区失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"批量删除分区失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -396,6 +400,15 @@ namespace Layouter.ViewModels
         /// 编辑全局样式
         /// </summary>
         public void EditGlobalStyle()
+        {
+            ShowGlobalPartitionSettings();
+        }
+
+        /// <summary>
+        /// 打开「全局分区设置」窗口。
+        /// <para>抽成静态方法后，托盘菜单等外部入口也可以直接复用。</para>
+        /// </summary>
+        public static void ShowGlobalPartitionSettings()
         {
             try
             {
@@ -413,23 +426,10 @@ namespace Layouter.ViewModels
                 if (settingsWindow.ShowDialog() == true)
                 {
                     // 保存全局设置
-                    var newGlobalSettings = new GlobalPartitionSettings
-                    {
-                        TitleForeground = ((SolidColorBrush)globalViewModel.TitleForeground).Color,
-                        TitleBackground = ((SolidColorBrush)globalViewModel.TitleBackground).Color,
-                        TitleFont = globalViewModel.TitleFont.Source,
-                        TitleFontSize = globalViewModel.TitleFontSize,
-                        TitleAlignment = globalViewModel.TitleAlignment,
-                        Opacity = globalViewModel.Opacity,
-                        IconSize = globalViewModel.IconSize,
-                        IconTextSize = globalViewModel.IconTextSize,
-                        IsLocked = globalViewModel.IsLocked
-                    };
-
                     PartitionSettingsService.Instance.SaveSettings(globalViewModel, true);
 
                     // 如果启用了全局样式,则更新所有窗口
-                    if (EnableGlobalStyle)
+                    if (GeneralSettingsService.Instance.GetEnableGlobalStyle())
                     {
                         // 应用全局样式到所有窗口
                         WindowManagerService.Instance.UpdateAllWindowStyles();
@@ -439,7 +439,7 @@ namespace Layouter.ViewModels
             catch (Exception ex)
             {
                 Log.Information($"编辑全局样式失败: {ex.Message}");
-                MessageBox.Show($"编辑全局样式失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"编辑全局样式失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 

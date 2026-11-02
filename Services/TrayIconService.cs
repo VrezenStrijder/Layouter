@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -52,7 +52,7 @@ namespace Layouter.Services
             }
             else
             {
-                MessageBox.Show("无法初始化托盘图标", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show("无法初始化托盘图标", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 

@@ -55,7 +55,7 @@ namespace Layouter.Plugins.SysCheckPlugin
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"初始化性能计数器失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppMessageBox.Show($"初始化性能计数器失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -69,7 +69,7 @@ namespace Layouter.Plugins.SysCheckPlugin
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"执行功能出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    AppMessageBox.Show($"执行功能出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                     return null;
                 }
             }
@@ -281,7 +281,7 @@ namespace Layouter.Plugins.SysCheckPlugin
         //    }
         //    catch (Exception ex)
         //    {
-        //        MessageBox.Show($"更新资源使用率失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        //        AppMessageBox.Show($"更新资源使用率失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
         //        StopMonitoring();
         //    }
         //}

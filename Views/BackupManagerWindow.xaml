@@ -1,0 +1,246 @@
+<Window x:Class="Layouter.Views.BackupManagerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:Layouter.ViewModels"
+        xmlns:FluentIcons="clr-namespace:FluentIcons.Wpf;assembly=FluentIcons.Wpf"
+        mc:Ignorable="d"
+        Title="备份与还原"
+        Height="620" Width="920"
+        MinHeight="520" MinWidth="820"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanResize">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- ============ 页头 ============ -->
+        <Border Grid.Row="0"
+                Background="{StaticResource AppSurfaceBrush}"
+                BorderBrush="{StaticResource AppBorderBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="20,16">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <TextBlock Text="备份与还原" Style="{StaticResource AppPageTitleText}"/>
+                    <TextBlock Text="备份当前的分区与通用配置，支持随时还原到任意一个备份点。"
+                               Style="{StaticResource AppCaptionText}"
+                               Margin="0,4,0,0"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <StackPanel Margin="0,0,12,0" VerticalAlignment="Center">
+                        <TextBlock Text="备份目录" Style="{StaticResource AppCaptionText}"/>
+                        <TextBlock Text="{Binding BackupRootPath}"
+                                   ToolTip="{Binding BackupRootPath}"
+                                   MaxWidth="280"
+                                   TextTrimming="CharacterEllipsis"
+                                   Foreground="{StaticResource AppTextSecondaryBrush}"
+                                   FontSize="{StaticResource AppFontSizeCaption}"/>
+                    </StackPanel>
+                    <Button Content="更改…" Command="{Binding ChangeBackupRootCommand}" ToolTip="选择用于存放备份的目录"/>
+                    <Button Content="打开" Command="{Binding OpenBackupRootCommand}" ToolTip="在资源管理器中打开备份目录"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ============ 主体 ============ -->
+        <Grid Grid.Row="1" Margin="20,16,20,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="320"/>
+                <ColumnDefinition Width="16"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- 左栏：创建备份 + 备份详情 -->
+            <Grid Grid.Column="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="16"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Style="{StaticResource AppCard}">
+                    <StackPanel>
+                        <TextBlock Text="创建备份" Style="{StaticResource AppSectionTitleText}" Margin="0,0,0,10"/>
+
+                        <TextBlock Text="名称" Style="{StaticResource AppCaptionText}" Margin="0,0,0,4"/>
+                        <TextBox Text="{Binding BackupName, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="用于区分不同备份的名称"/>
+
+                        <TextBlock Text="备注" Style="{StaticResource AppCaptionText}" Margin="0,12,0,4"/>
+                        <TextBox Text="{Binding BackupRemark, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="可选，用于说明这次备份的内容"
+                                 AcceptsReturn="True"
+                                 Height="64"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"/>
+
+                        <Button Style="{StaticResource AppPrimaryButton}"
+                                Command="{Binding CreateBackupCommand}"
+                                HorizontalAlignment="Stretch"
+                                Margin="0,14,0,0">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                <FluentIcons:SymbolIcon Symbol="Save" FontSize="14" VerticalAlignment="Center"/>
+                                <TextBlock Text="创建备份" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="2" Style="{StaticResource AppCard}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Text="备份详情" Style="{StaticResource AppSectionTitleText}" Margin="0,0,0,10"/>
+
+                        <!-- 详情文本可能很长，窗口变小时用垂直滚动条查看完整内容 -->
+                        <ScrollViewer Grid.Row="1"
+                                      VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      MaxHeight="220">
+                            <TextBlock Text="{Binding SelectedBackupDetails}"
+                                       Style="{StaticResource AppCaptionText}"
+                                       Foreground="{StaticResource AppTextSecondaryBrush}"
+                                       TextWrapping="Wrap"/>
+                        </ScrollViewer>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- 右栏：备份列表 -->
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0" Margin="0,0,0,8">
+                    <TextBlock Text="备份列表" Style="{StaticResource AppSectionTitleText}" Margin="0,0,0,0"/>
+                    <TextBlock Text="{Binding Backups.Count, StringFormat='共 {0} 个'}"
+                               HorizontalAlignment="Right"
+                               VerticalAlignment="Center"
+                               Style="{StaticResource AppCaptionText}"/>
+                </Grid>
+
+                <Grid Grid.Row="1">
+                    <DataGrid ItemsSource="{Binding Backups}"
+                              SelectedItem="{Binding SelectedBackup}"
+                              AutoGenerateColumns="False"
+                              CanUserAddRows="False"
+                              CanUserDeleteRows="False"
+                              CanUserReorderColumns="False"
+                              IsReadOnly="True"
+                              SelectionMode="Single"
+                              RowHeight="38"
+                              SelectionUnit="FullRow">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="名称"
+                                                Binding="{Binding Name}"
+                                                Width="1.3*"
+                                                MinWidth="160"
+                                                ElementStyle="{StaticResource AppTableCellText}"/>
+                            <DataGridTextColumn Header="备注"
+                                                Binding="{Binding RemarkText}"
+                                                Width="1.8*"
+                                                MinWidth="180"
+                                                ElementStyle="{StaticResource AppTableCellText}"/>
+                            <DataGridTextColumn Header="创建时间"
+                                                Binding="{Binding CreatedAtText}"
+                                                Width="140"
+                                                ElementStyle="{StaticResource AppTableCellText}"/>
+                            <DataGridTextColumn Header="文件数"
+                                                Binding="{Binding FileCountText}"
+                                                Width="56"
+                                                ElementStyle="{StaticResource AppTableCellText}"/>
+                            <DataGridTextColumn Header="大小"
+                                                Binding="{Binding FileSizeText}"
+                                                Width="72"
+                                                ElementStyle="{StaticResource AppTableCellText}"/>
+                            <DataGridTextColumn Header="来源"
+                                                Binding="{Binding SourceText}"
+                                                Width="84"
+                                                ElementStyle="{StaticResource AppTableCellText}"/>
+                            <DataGridTextColumn Header="状态"
+                                                Binding="{Binding ValidText}"
+                                                Width="56"
+                                                ElementStyle="{StaticResource AppTableCellText}"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <!-- 空状态 -->
+                    <Border Background="{StaticResource AppSurfaceBrush}"
+                            BorderBrush="{StaticResource AppBorderBrush}"
+                            BorderThickness="1" CornerRadius="10" Padding="28"
+                            HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Backups.Count}" Value="0">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <StackPanel>
+                            <FluentIcons:SymbolIcon Symbol="Archive"
+                                                  FontSize="36"
+                                                  HorizontalAlignment="Center"
+                                                  Foreground="{StaticResource AppBorderStrongBrush}"/>
+                            <TextBlock Text="当前还没有备份"
+                                       HorizontalAlignment="Center"
+                                       Margin="0,12,0,0"
+                                       FontSize="15"
+                                       FontWeight="SemiBold"
+                                       Foreground="{StaticResource AppTextSecondaryBrush}"/>
+                            <TextBlock Text="在左侧填写名称与备注后点击「创建备份」。"
+                                       HorizontalAlignment="Center"
+                                       Margin="0,6,0,0"
+                                       Style="{StaticResource AppCaptionText}"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Grid>
+        </Grid>
+
+        <!-- ============ 底部操作栏 ============ -->
+        <Border Grid.Row="2"
+                Background="{StaticResource AppSurfaceBrush}"
+                BorderBrush="{StaticResource AppBorderBrush}"
+                BorderThickness="0,1,0,0"
+                Padding="20,12">
+            <Grid>
+                <TextBlock Text="{Binding StatusMessage}"
+                           Style="{StaticResource AppCaptionText}"
+                           VerticalAlignment="Center"/>
+
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Content="刷新" Command="{Binding RefreshBackupsCommand}" ToolTip="重新读取备份列表"/>
+                    <Button Content="还原"
+                            Style="{StaticResource AppPrimaryButton}"
+                            Command="{Binding RestoreBackupCommand}"
+                            IsEnabled="{Binding HasSelectedBackup}"
+                            ToolTip="用选中的备份覆盖当前配置"/>
+                    <Button Content="删除"
+                            Style="{StaticResource AppDangerButton}"
+                            Command="{Binding DeleteBackupCommand}"
+                            IsEnabled="{Binding HasSelectedBackup}"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

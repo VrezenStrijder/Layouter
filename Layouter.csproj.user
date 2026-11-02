@@ -1,24 +1,14 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <PropertyGroup />
+  <PropertyGroup>
+    <_LastSelectedProfileId>D:\Dev\projects\CursorProjs\Layouter_publish\Layouter\Properties\PublishProfiles\FrameworkDependencyVersion.pubxml</_LastSelectedProfileId>
+  </PropertyGroup>
   <ItemGroup>
     <ApplicationDefinition Update="App.xaml">
       <SubType>Designer</SubType>
     </ApplicationDefinition>
   </ItemGroup>
   <ItemGroup>
-    <Compile Update="Plugins\Deprecated\MemoryMonitorPlugin\MemoryMonitorView.xaml.cs">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Update="Plugins\Deprecated\PluginCompilerWindow.xaml.cs">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Update="Plugins\Deprecated\PluginManagerWindow.xaml.cs">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Update="Plugins\PluginsManagerWindow.xaml.cs">
-      <SubType>Code</SubType>
-    </Compile>
     <Compile Update="Views\PartitionManagerWindow.xaml.cs">
       <SubType>Code</SubType>
     </Compile>
@@ -27,18 +17,6 @@
     </Compile>
   </ItemGroup>
   <ItemGroup>
-    <Page Update="Plugins\Deprecated\MemoryMonitorPlugin\MemoryMonitorView.xaml">
-      <SubType>Designer</SubType>
-    </Page>
-    <Page Update="Plugins\Deprecated\PluginCompilerWindow.xaml">
-      <SubType>Designer</SubType>
-    </Page>
-    <Page Update="Plugins\Deprecated\PluginManagerWindow.xaml">
-      <SubType>Designer</SubType>
-    </Page>
-    <Page Update="Plugins\PluginsManagerWindow.xaml">
-      <SubType>Designer</SubType>
-    </Page>
     <Page Update="Styles\TrayIconResources.xaml">
       <SubType>Designer</SubType>
     </Page>

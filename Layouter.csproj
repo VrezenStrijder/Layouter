@@ -6,35 +6,35 @@
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<UseWPF>true</UseWPF>
-		<AssemblyVersion>2.0.0.0</AssemblyVersion>
-		<FileVersion>2.0.0.0</FileVersion>
+		<AssemblyVersion>2.1.0.0</AssemblyVersion>
+		<FileVersion>2.1.0.0</FileVersion>
 		<ApplicationIcon>Resources\icon.ico</ApplicationIcon>
 
 		<Product>桌面助手(Layouter)</Product>
 		<Authors>@VrezenStrijder</Authors>
-		<Copyright>Copyright © 2025 @VrezenStrijder. All rights reserved.</Copyright>
+		<Copyright>Copyright © 2026 @VrezenStrijder. All rights reserved.</Copyright>
 		<AssemblyTitle>Layouter</AssemblyTitle>
-		<Version>2.0.0</Version>
+		<Version>2.1.0.0</Version>
 	</PropertyGroup>
 
 	<ItemGroup>
+		<Compile Remove="Examples\**" />
 		<Compile Remove="Plugins\Deprecated\**" />
-		<Compile Remove="Plugins\Models\**" />
 		<Compile Remove="Plugins\SysCheckPlugin\**" />
 		<Compile Remove="Resources\Images\**" />
 		<Compile Remove="SysCheckPlugin\**" />
+		<EmbeddedResource Remove="Examples\**" />
 		<EmbeddedResource Remove="Plugins\Deprecated\**" />
-		<EmbeddedResource Remove="Plugins\Models\**" />
 		<EmbeddedResource Remove="Plugins\SysCheckPlugin\**" />
 		<EmbeddedResource Remove="Resources\Images\**" />
 		<EmbeddedResource Remove="SysCheckPlugin\**" />
+		<None Remove="Examples\**" />
 		<None Remove="Plugins\Deprecated\**" />
-		<None Remove="Plugins\Models\**" />
 		<None Remove="Plugins\SysCheckPlugin\**" />
 		<None Remove="Resources\Images\**" />
 		<None Remove="SysCheckPlugin\**" />
+		<Page Remove="Examples\**" />
 		<Page Remove="Plugins\Deprecated\**" />
-		<Page Remove="Plugins\Models\**" />
 		<Page Remove="Plugins\SysCheckPlugin\**" />
 		<Page Remove="Resources\Images\**" />
 		<Page Remove="SysCheckPlugin\**" />
@@ -43,17 +43,33 @@
 	<ItemGroup>
 		<Compile Remove="MainWindow.xaml.cs" />
 		<Compile Remove="Models\Configuration.cs" />
-		<Compile Remove="Plugins\LoadedPlugin.cs" />
+		<Compile Remove="Plugins\CalculatorPlugin.cs" />
 		<Compile Remove="Plugins\PluginDemoWindow.xaml.cs" />
+		<Compile Remove="Plugins\PluginTemplates\DefaultPluginTemplate.cs" />
+		<Compile Remove="Plugins\PluginTemplates\DynamicPluginCodeFileTemplate.cs" />
 		<Compile Remove="Plugins\TemplateManager.cs" />
 		<Compile Remove="Services\ConfigurationService.cs" />
 		<Compile Remove="Services\DataService.cs" />
+		<Compile Remove="Utility\ContextMenuExtensions.cs" />
+		<Compile Remove="Utility\ContextMenu_bak.cs" />
+		<Compile Remove="Utility\DesktopAttacher.cs" />
 		<Compile Remove="Utility\ShellContextMenu_bak.cs" />
 		<Compile Remove="Utility\Win32Util.cs" />
 		<Compile Remove="ViewModels\AddPartitionViewModel.cs" />
 		<Compile Remove="ViewModels\Feature1ViewModel.cs" />
+		<Compile Remove="ViewModels\OptionItem.cs" />
 		<Compile Remove="Views\DesktopManagerView.xaml.cs" />
+		<Compile Remove="Views\DesktopManagerWindowExtension.cs" />
 		<Compile Remove="Views\Feature1Window.xaml.cs" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Remove="Plugins\PluginTemplates\pluginIcons.json" />
+		<None Remove="Plugins\PluginTemplates\PluginInfo.json" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<EmbeddedResource Include="Plugins\PluginTemplates\PluginTemplate.cs" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -81,11 +97,6 @@
 		<PackageReference Include="Serilog.Extensions.Logging" Version="9.0.0" />
 		<PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
 		<PackageReference Include="System.IO.Compression" Version="4.3.0" />
-		<PackageReference Include="System.Management" Version="8.0.0" />
-	</ItemGroup>
-
-	<ItemGroup>
-		<ProjectReference Include="..\LayouterPlugins\PluginEntry\PluginEntry.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -95,9 +106,11 @@
 		<Reference Include="FluentIcons.Wpf">
 			<HintPath>libs\FluentIcons.Wpf.dll</HintPath>
 		</Reference>
-		<Reference Include="Win32">
-			<HintPath>..\..\..\githubProjs\Layouter\libs\Win32.dll</HintPath>
-		</Reference>
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\PluginEntry\PluginEntry.csproj" />
+		<ProjectReference Include="..\Win32\Win32.csproj" />
 	</ItemGroup>
 
 </Project>

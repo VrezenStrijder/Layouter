@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:vm="clr-namespace:Layouter.ViewModels"
-        xmlns:local="clr-namespace:Layouter.Views" 
+        xmlns:local="clr-namespace:Layouter.Views"
         xmlns:FluentIcons="clr-namespace:FluentIcons.Wpf;assembly=FluentIcons.Wpf"
         mc:Ignorable="d"
         Title="分区管理器"
@@ -23,6 +23,68 @@
         ShowInTaskbar="False">
 
     <Window.Resources>
+        <!-- 标题栏按钮：悬浮时显示半透明高亮 -->
+        <Style x:Key="TitleBarButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="28"/>
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Margin" Value="2,0"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Border"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="5">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="#26FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="#40FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 设置弹层中的菜单项 -->
+        <Style x:Key="PopupMenuItemStyle" TargetType="Button">
+            <Setter Property="Width" Value="140"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="Padding" Value="10,0"/>
+            <Setter Property="Margin" Value="2"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Border"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="5">
+                            <ContentPresenter HorizontalAlignment="Left"
+                                              VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="{StaticResource AppAccentSoftBrush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource AppAccentBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <ContextMenu x:Key="PartitionContextMenu">
             <MenuItem Header="自动排列图标" Click="AutoArrange_Click"/>
             <MenuItem Header="对齐所有分区" Click="AlignPartitions_Click"/>
@@ -49,7 +111,7 @@
                     <Grid>
                         <Label Background="Transparent" MouseDoubleClick="DoubleClickHandler" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Focusable="False" Padding="0" Margin="0" />
                         <!-- 标题栏 -->
-                        <Grid x:Name="TitleBar" Height="30">
+                        <Grid x:Name="TitleBar" Height="32">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
@@ -82,31 +144,37 @@
                                 <TextBox x:Name="TitleEditBox" Visibility="Collapsed" Margin="10,3" KeyDown="TitleEditBox_KeyDown" LostFocus="TitleEditBox_LostFocus"/>
                             </Grid>
                             <!-- 功能按钮区域 -->
-                            <StackPanel Orientation="Horizontal" Grid.Column="1">
+                            <StackPanel Orientation="Horizontal" Grid.Column="1" VerticalAlignment="Center" Margin="0,0,4,0">
                                 <!-- 新增分区按钮 -->
-                                <Button Width="30" Height="30" Padding="0" ToolTip="新建分区"  Background="Transparent" BorderThickness="0" Click="NewPartition_Click" x:Name="NewPartitionButton">
+                                <Button Style="{StaticResource TitleBarButtonStyle}" ToolTip="新建分区" Click="NewPartition_Click" x:Name="NewPartitionButton">
                                     <FluentIcons:SymbolIcon Symbol="Add" FontSize="16" Foreground="{Binding TitleForeground}" />
                                 </Button>
 
                                 <!-- 锁定按钮 -->
-                                <Button Width="30" Height="30" Padding="0" ToolTip="未锁定"  Background="Transparent" BorderThickness="0" Click="LockButton_Click" x:Name="LockButton">
+                                <Button Style="{StaticResource TitleBarButtonStyle}" ToolTip="未锁定" Click="LockButton_Click" x:Name="LockButton">
                                     <FluentIcons:SymbolIcon Symbol="LockOpen" FontSize="16" Foreground="{Binding TitleForeground}" x:Name="LockIcon" />
                                 </Button>
 
                                 <!-- 设置按钮 -->
-                                <Button Width="30" Height="30" Padding="0" ToolTip="设置" Background="Transparent" BorderThickness="0" Click="Settings_Click" x:Name="SettingsButton">
+                                <Button Style="{StaticResource TitleBarButtonStyle}" ToolTip="设置" Click="Settings_Click" x:Name="SettingsButton">
                                     <FluentIcons:SymbolIcon Symbol="Settings" FontSize="16" Foreground="{Binding TitleForeground}" />
                                 </Button>
                             </StackPanel>
 
                             <!-- 设置菜单 -->
-                            <Popup x:Name="SettingsPopup" StaysOpen="False" PlacementTarget="{Binding ElementName=SettingsButton}" Placement="Bottom">
-                                <Border Background="White" BorderBrush="#CCCCCC" BorderThickness="1" CornerRadius="3">
+                            <Popup x:Name="SettingsPopup" StaysOpen="False" PlacementTarget="{Binding ElementName=SettingsButton}" Placement="Bottom" AllowsTransparency="True">
+                                <Border Background="{StaticResource AppSurfaceBrush}"
+                                        BorderBrush="{StaticResource AppBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="{StaticResource AppCornerRadius}"
+                                        Padding="3"
+                                        Margin="0,4,0,0">
                                     <StackPanel>
-                                        <Button Content="分区设置" Click="PartitionSettings_Click" Width="120" Height="30" Background="Transparent" BorderThickness="0"/>
-                                        <Button Content="删除分区" Click="DeletePartition_Click" Width="120" Height="30" Background="Transparent" BorderThickness="0"/>
-                                        <Button Content="对齐图标" Click="AutoArrange_Click" Width="120" Height="30" Background="Transparent" BorderThickness="0"/>
-                                        <Button Content="对齐分区" Click="AlignPartitions_Click" Width="120" Height="30" Background="Transparent" BorderThickness="0"/>
+                                        <Button Content="分区设置" Click="PartitionSettings_Click" Style="{StaticResource PopupMenuItemStyle}"/>
+                                        <Button Content="删除分区" Click="DeletePartition_Click" Style="{StaticResource PopupMenuItemStyle}"/>
+                                        <Separator/>
+                                        <Button Content="对齐图标" Click="AutoArrange_Click" Style="{StaticResource PopupMenuItemStyle}"/>
+                                        <Button Content="对齐分区" Click="AlignPartitions_Click" Style="{StaticResource PopupMenuItemStyle}"/>
                                     </StackPanel>
                                 </Border>
                             </Popup>
@@ -116,7 +184,7 @@
 
                 <!-- 图标区域 -->
                 <Border x:Name="IconsContainer" Grid.Row="1" Background="{Binding ContentBackground}" CornerRadius="0,0,8,8">
-                    <ItemsControl ItemsSource="{Binding Icons}" Margin="5,5,5,5" 
+                    <ItemsControl ItemsSource="{Binding Icons}" Margin="5,5,5,5"
                      AllowDrop="True" Background="Transparent"
                      x:Name="iconsContainer"
                      PreviewMouseLeftButtonDown="IconsContainer_PreviewMouseLeftButtonDown"
@@ -138,34 +206,57 @@
 
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Grid Tag="{Binding}" MouseLeftButtonDown="Icon_MouseDown" MouseLeftButtonUp="Icon_MouseUp" >
-                                    <Grid.Style>
-                                        <Style TargetType="Grid">
-                                            <Setter Property="Background" Value="Transparent" />
-                                            <Setter Property="Cursor" Value="Arrow" />
+                                <Border x:Name="IconHighlight"
+                                        CornerRadius="6"
+                                        Padding="2"
+                                        Tag="{Binding}"
+                                        MouseLeftButtonDown="Icon_MouseDown"
+                                        MouseLeftButtonUp="Icon_MouseUp">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="Transparent"/>
+                                            <Setter Property="Cursor" Value="Arrow"/>
                                             <Style.Triggers>
                                                 <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter Property="Background" Value="#30FFFFFF" />
-                                                    <Setter Property="Cursor" Value="Hand" />
+                                                    <Setter Property="Background" Value="#1FFFFFFF"/>
+                                                    <Setter Property="Cursor" Value="Hand"/>
                                                 </Trigger>
                                             </Style.Triggers>
                                         </Style>
-                                    </Grid.Style>
-                                    <Rectangle Fill="Transparent" />
+                                    </Border.Style>
 
-                                    <!-- 图标 -->
-                                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" >
-                                        <!-- 使用文件系统图标 -->
-                                        <Image Width="{Binding Size.Width}" Height="{Binding Size.Height}" Stretch="Uniform"  Margin="10,2,10,5">
-                                            <Image.Source>
-                                                <!-- 使用转换器获取文件图标 -->
-                                                <Binding Path="IconPath" Converter="{StaticResource FilePathToIconConverter}"/>
-                                            </Image.Source>
-                                        </Image>
-                                        <!-- 文件名称 -->
-                                        <TextBlock Text="{Binding Name}" TextWrapping="Wrap" TextAlignment="Center" FontSize="{Binding TextSize}" MaxWidth="60"/>
-                                    </StackPanel>
-                                </Grid>
+                                    <Grid>
+                                        <!-- 图标 -->
+                                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                            <!-- 使用文件系统图标：同时传入显示尺寸，以便按原生分辨率取图，避免拉伸后模糊 -->
+                                            <Image Width="{Binding Size.Width}" Height="{Binding Size.Height}"
+                                                   Stretch="Uniform" Margin="10,2,10,5"
+                                                   RenderOptions.BitmapScalingMode="HighQuality">
+                                                <Image.Source>
+                                                    <MultiBinding Converter="{StaticResource FilePathToIconConverter}">
+                                                        <Binding Path="IconPath"/>
+                                                        <Binding Path="Size"/>
+                                                    </MultiBinding>
+                                                </Image.Source>
+                                            </Image>
+                                            <!-- 文件名称：白色文字 + 深色投影，保证在深色/浅色壁纸上都清晰可读 -->
+                                            <TextBlock Text="{Binding Name}"
+                                                       TextWrapping="Wrap"
+                                                       TextAlignment="Center"
+                                                       FontSize="{Binding TextSize}"
+                                                       MaxWidth="60"
+                                                       Foreground="White">
+                                                <TextBlock.Effect>
+                                                    <DropShadowEffect Color="Black"
+                                                                      BlurRadius="5"
+                                                                      ShadowDepth="1"
+                                                                      Opacity="0.9"
+                                                                      RenderingBias="Quality"/>
+                                                </TextBlock.Effect>
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>

@@ -50,6 +50,16 @@ namespace Layouter
 
             // 初始化自启动设置
             GeneralSettingsService.Instance.InitializeAutoStart();
+
+            // 初始化安全隐藏存储（并把旧版桌面隐藏目录迁移走，桌面不再残留隐藏目录）
+            SecureHiddenStore.Instance.EnsureInitialized();
+
+            // 启用「双击桌面隐藏图标」时注册桌面双击事件
+            if (GeneralSettingsService.Instance.GetEnableDesktopDoubleClickToggle())
+            {
+                DesktopService.Instance.RegisterDesktopDoubleClickEvent();
+            }
+
             // 启动托盘图标
             TrayIconService.Instance.Initialize();
             
@@ -90,6 +100,9 @@ namespace Layouter
             // 清理资源
             trayIconService?.Dispose();
             serviceProvider?.Dispose();
+
+            // 注销桌面双击事件（避免残留的窗口过程钩子）
+            DesktopService.Instance.UnregisterDesktopDoubleClickEvent();
 
             Log.CloseAndFlush();
 

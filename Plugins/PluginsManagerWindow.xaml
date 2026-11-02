@@ -5,9 +5,19 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:Layouter.Plugins"
         xmlns:controls="clr-namespace:Layouter.Plugins.Controls"
+        xmlns:FluentIcons="clr-namespace:FluentIcons.Wpf;assembly=FluentIcons.Wpf"
         mc:Ignorable="d"
-        Title="插件管理" Height="600" Width="900"
+        Title="插件管理" Height="640" Width="960" MinHeight="480" MinWidth="760"
+        WindowStartupLocation="CenterScreen"
         Loaded="Window_Loaded">
+
+    <Window.Resources>
+        <Style x:Key="CenteredCellStyle" TargetType="DataGridCell" BasedOn="{StaticResource {x:Type DataGridCell}}">
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Padding" Value="10,0"/>
+        </Style>
+    </Window.Resources>
+
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -15,51 +25,125 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <ToolBar Grid.Row="0">
-            <Button Content="导入插件" Click="ImportPlugin_Click"/>
-            <Separator/>
-            <Button Content="刷新" Click="RefreshPlugins_Click"/>
-            <Separator/>
-            <Button Content="创建插件" Command="{Binding CreatePluginCommand}"/>
-        </ToolBar>
+        <!-- ============ 页头 ============ -->
+        <Border Grid.Row="0"
+                Background="{StaticResource AppSurfaceBrush}"
+                BorderBrush="{StaticResource AppBorderBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="20,16">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
 
-        <TabControl x:Name="MainTabControl" Grid.Row="1" Margin="5">
+                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <TextBlock Text="插件管理" Style="{StaticResource AppPageTitleText}"/>
+                    <TextBlock Text="导入、配置与扩展 Layouter 的功能模块"
+                               Style="{StaticResource AppCaptionText}"
+                               Margin="0,4,0,0"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Style="{StaticResource AppGhostButton}" Click="RefreshPlugins_Click">
+                        <StackPanel Orientation="Horizontal">
+                            <FluentIcons:SymbolIcon Symbol="ArrowSync" FontSize="14" VerticalAlignment="Center"/>
+                            <TextBlock Text="刷新" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource AppGhostButton}" Click="ImportPlugin_Click">
+                        <StackPanel Orientation="Horizontal">
+                            <FluentIcons:SymbolIcon Symbol="ArrowDownload" FontSize="14" VerticalAlignment="Center"/>
+                            <TextBlock Text="导入插件" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource AppPrimaryButton}" Command="{Binding CreatePluginCommand}">
+                        <StackPanel Orientation="Horizontal">
+                            <FluentIcons:SymbolIcon Symbol="Add" FontSize="14" VerticalAlignment="Center"/>
+                            <TextBlock Text="创建插件" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ============ 内容 ============ -->
+        <TabControl x:Name="MainTabControl" Grid.Row="1" Margin="20,12,20,0">
             <TabItem Header="插件列表" x:Name="PluginsListTab">
-                <Grid>
-                    <ListView x:Name="PluginsListView" Margin="5">
-                        <ListView.View>
-                            <GridView>
-                                <GridViewColumn Header="名称" DisplayMemberBinding="{Binding Name}" Width="150"/>
-                                <GridViewColumn Header="版本" DisplayMemberBinding="{Binding Version}" Width="80"/>
-                                <GridViewColumn Header="描述" DisplayMemberBinding="{Binding Description}" Width="200"/>
-                                <GridViewColumn Header="作者" DisplayMemberBinding="{Binding Author}" Width="100"/>
-                                <GridViewColumn Header="状态" Width="80">
-                                    <GridViewColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <CheckBox IsChecked="{Binding IsEnabled}" Click="PluginEnabled_Click" Tag="{Binding Id}"/>
-                                        </DataTemplate>
-                                    </GridViewColumn.CellTemplate>
-                                </GridViewColumn>
-                                <GridViewColumn Header="操作" Width="210">
-                                    <GridViewColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <StackPanel Orientation="Horizontal">
-                                                <Button Content="编辑" Margin="2" Click="EditPlugin_Click" Tag="{Binding Id}"/>
-                                                <Button Content="参数设置" Margin="2" Click="PluginSettings_Click" Tag="{Binding Id}"/>
-                                                <Button Content="删除" Margin="2" Click="DeletePlugin_Click" Tag="{Binding Id}"/>
-                                            </StackPanel>
-                                        </DataTemplate>
-                                    </GridViewColumn.CellTemplate>
-                                </GridViewColumn>
-                            </GridView>
-                        </ListView.View>
-                    </ListView>
+                <Grid Margin="0,12,0,0">
+                    <DataGrid x:Name="PluginsGrid"
+                              AutoGenerateColumns="False"
+                              CanUserAddRows="False"
+                              CanUserDeleteRows="False"
+                              CellStyle="{StaticResource CenteredCellStyle}"
+                              RowHeight="40">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="名称"
+                                                Binding="{Binding Name}"
+                                                Width="1.2*"
+                                                MinWidth="140"
+                                                IsReadOnly="True"
+                                                ElementStyle="{StaticResource AppTableCellText}"/>
+                            <DataGridTextColumn Header="版本"
+                                                Binding="{Binding Version}"
+                                                Width="80"
+                                                IsReadOnly="True"
+                                                ElementStyle="{StaticResource AppTableCellText}"/>
+                            <DataGridTextColumn Header="描述"
+                                                Binding="{Binding Description}"
+                                                Width="2*"
+                                                MinWidth="200"
+                                                IsReadOnly="True"
+                                                ElementStyle="{StaticResource AppTableCellText}"/>
+                            <DataGridTextColumn Header="作者"
+                                                Binding="{Binding Author}"
+                                                Width="110"
+                                                IsReadOnly="True"
+                                                ElementStyle="{StaticResource AppTableCellText}"/>
+                            <DataGridTemplateColumn Header="启用" Width="60">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <CheckBox IsChecked="{Binding IsEnabled}"
+                                                  Click="PluginEnabled_Click"
+                                                  Tag="{Binding Id}"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="操作" Width="240">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Button Content="编辑"
+                                                    Style="{StaticResource AppTableActionButton}"
+                                                    Click="EditPlugin_Click"
+                                                    Tag="{Binding Id}"/>
+                                            <Button Content="参数设置"
+                                                    Style="{StaticResource AppTableActionButton}"
+                                                    Click="PluginSettings_Click"
+                                                    Tag="{Binding Id}"/>
+                                            <Button Content="删除"
+                                                    Style="{StaticResource AppTableDangerButton}"
+                                                    Click="DeletePlugin_Click"
+                                                    Tag="{Binding Id}"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
                 </Grid>
             </TabItem>
         </TabControl>
 
-        <StatusBar Grid.Row="2">
-            <TextBlock x:Name="StatusBar" Text="准备就绪"/>
-        </StatusBar>
+        <!-- ============ 状态栏 ============ -->
+        <Border Grid.Row="2"
+                Background="{StaticResource AppSurfaceBrush}"
+                BorderBrush="{StaticResource AppBorderBrush}"
+                BorderThickness="0,1,0,0"
+                Padding="20,8">
+            <TextBlock x:Name="StatusBar" Text="准备就绪" Style="{StaticResource AppCaptionText}"/>
+        </Border>
     </Grid>
 </Window>

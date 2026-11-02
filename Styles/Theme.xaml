@@ -1,0 +1,98 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=System.Runtime">
+
+    <!--
+        ============================================================
+        Layouter 统一设计令牌 (Design Tokens)
+        所有窗口与控件的配色、圆角、间距、字号均来源于此文件，
+        以保证整个应用视觉风格的一致性。
+        ============================================================
+    -->
+
+    <!-- ==================== 品牌色 ==================== -->
+    <Color x:Key="ColorAccent">#2563EB</Color>
+    <Color x:Key="ColorAccentHover">#1D4ED8</Color>
+    <Color x:Key="ColorAccentPressed">#1E40AF</Color>
+    <Color x:Key="ColorAccentSoft">#EFF6FF</Color>
+    <Color x:Key="ColorAccentSoftHover">#DBEAFE</Color>
+    <Color x:Key="ColorAccentBorder">#BFDBFE</Color>
+
+    <!-- ==================== 功能色 ==================== -->
+    <Color x:Key="ColorDanger">#DC2626</Color>
+    <Color x:Key="ColorDangerHover">#B91C1C</Color>
+    <Color x:Key="ColorDangerSoft">#FEF2F2</Color>
+    <Color x:Key="ColorSuccess">#059669</Color>
+    <Color x:Key="ColorSuccessSoft">#ECFDF5</Color>
+    <Color x:Key="ColorWarning">#D97706</Color>
+    <Color x:Key="ColorWarningSoft">#FFFBEB</Color>
+
+    <!-- ==================== 中性色 ==================== -->
+    <Color x:Key="ColorText">#1F2937</Color>
+    <Color x:Key="ColorTextSecondary">#4B5563</Color>
+    <Color x:Key="ColorTextMuted">#6B7280</Color>
+    <Color x:Key="ColorTextDisabled">#9CA3AF</Color>
+    <Color x:Key="ColorSurface">#FFFFFF</Color>
+    <Color x:Key="ColorSurfaceSubtle">#F8FAFC</Color>
+    <Color x:Key="ColorSurfaceMuted">#F1F5F9</Color>
+    <Color x:Key="ColorSurfaceHover">#F3F4F6</Color>
+    <Color x:Key="ColorBorder">#D8DEE9</Color>
+    <Color x:Key="ColorBorderStrong">#B8C2D1</Color>
+    <Color x:Key="ColorSelected">#DBEAFE</Color>
+    <Color x:Key="ColorHeaderBackground">#EEF2F7</Color>
+
+    <!-- ==================== 画刷 ==================== -->
+    <SolidColorBrush x:Key="AppAccentBrush" Color="{StaticResource ColorAccent}"/>
+    <SolidColorBrush x:Key="AppAccentHoverBrush" Color="{StaticResource ColorAccentHover}"/>
+    <SolidColorBrush x:Key="AppAccentPressedBrush" Color="{StaticResource ColorAccentPressed}"/>
+    <SolidColorBrush x:Key="AppAccentSoftBrush" Color="{StaticResource ColorAccentSoft}"/>
+    <SolidColorBrush x:Key="AppAccentSoftHoverBrush" Color="{StaticResource ColorAccentSoftHover}"/>
+    <SolidColorBrush x:Key="AppAccentBorderBrush" Color="{StaticResource ColorAccentBorder}"/>
+
+    <SolidColorBrush x:Key="AppDangerBrush" Color="{StaticResource ColorDanger}"/>
+    <SolidColorBrush x:Key="AppDangerHoverBrush" Color="{StaticResource ColorDangerHover}"/>
+    <SolidColorBrush x:Key="AppDangerSoftBrush" Color="{StaticResource ColorDangerSoft}"/>
+
+    <SolidColorBrush x:Key="AppSuccessBrush" Color="{StaticResource ColorSuccess}"/>
+    <SolidColorBrush x:Key="AppSuccessSoftBrush" Color="{StaticResource ColorSuccessSoft}"/>
+    <SolidColorBrush x:Key="AppWarningBrush" Color="{StaticResource ColorWarning}"/>
+    <SolidColorBrush x:Key="AppWarningSoftBrush" Color="{StaticResource ColorWarningSoft}"/>
+
+    <SolidColorBrush x:Key="AppTextBrush" Color="{StaticResource ColorText}"/>
+    <SolidColorBrush x:Key="AppTextSecondaryBrush" Color="{StaticResource ColorTextSecondary}"/>
+    <SolidColorBrush x:Key="AppMutedTextBrush" Color="{StaticResource ColorTextMuted}"/>
+    <SolidColorBrush x:Key="AppDisabledTextBrush" Color="{StaticResource ColorTextDisabled}"/>
+
+    <SolidColorBrush x:Key="AppSurfaceBrush" Color="{StaticResource ColorSurface}"/>
+    <SolidColorBrush x:Key="AppSubtleSurfaceBrush" Color="{StaticResource ColorSurfaceSubtle}"/>
+    <SolidColorBrush x:Key="AppMutedSurfaceBrush" Color="{StaticResource ColorSurfaceMuted}"/>
+    <SolidColorBrush x:Key="AppHoverSurfaceBrush" Color="{StaticResource ColorSurfaceHover}"/>
+    <SolidColorBrush x:Key="AppBorderBrush" Color="{StaticResource ColorBorder}"/>
+    <SolidColorBrush x:Key="AppBorderStrongBrush" Color="{StaticResource ColorBorderStrong}"/>
+    <SolidColorBrush x:Key="AppSelectedBrush" Color="{StaticResource ColorSelected}"/>
+    <SolidColorBrush x:Key="AppHeaderBrush" Color="{StaticResource ColorHeaderBackground}"/>
+
+    <!-- ==================== 字体 ==================== -->
+    <FontFamily x:Key="AppFontFamily">Microsoft YaHei UI</FontFamily>
+    <FontFamily x:Key="AppMonoFontFamily">Consolas</FontFamily>
+
+    <sys:Double x:Key="AppFontSizeCaption">12</sys:Double>
+    <sys:Double x:Key="AppFontSizeBody">13</sys:Double>
+    <sys:Double x:Key="AppFontSizeSubtitle">15</sys:Double>
+    <sys:Double x:Key="AppFontSizeTitle">20</sys:Double>
+
+    <!-- ==================== 间距与圆角 ==================== -->
+    <CornerRadius x:Key="AppCornerRadiusSmall">4</CornerRadius>
+    <CornerRadius x:Key="AppCornerRadius">6</CornerRadius>
+    <CornerRadius x:Key="AppCornerRadiusLarge">10</CornerRadius>
+
+    <Thickness x:Key="AppPaddingSmall">8,4</Thickness>
+    <Thickness x:Key="AppPadding">12,6</Thickness>
+    <Thickness x:Key="AppPaddingLarge">16,10</Thickness>
+    <Thickness x:Key="AppPagePadding">20</Thickness>
+
+    <!-- 窗口统一外观 -->
+    <SolidColorBrush x:Key="AppWindowBackgroundBrush" Color="#FAFAFB"/>
+    <SolidColorBrush x:Key="AppCardBackgroundBrush" Color="{StaticResource ColorSurface}"/>
+    <SolidColorBrush x:Key="AppDividerBrush" Color="#E9EDF3"/>
+</ResourceDictionary>

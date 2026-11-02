@@ -299,6 +299,10 @@ namespace Layouter.ViewModels
             if (Icons.Contains(icon))
             {
                 Icons.Remove(icon);
+
+                // 图标被拖走或删除后，剩余图标需要重新排布填补空位，
+                // 否则原来的格子会留下一个空洞。
+                ArrangeIcons();
             }
         }
 
