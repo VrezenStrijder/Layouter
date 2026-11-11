@@ -83,8 +83,10 @@ namespace Layouter.ViewModels
                 return new PartitionManagerWindow();
             };
 
-            //创建单例窗口
-            SingletonWindowManager.Instance.ShowWindow<PartitionManagerWindow>(createFunc, true);
+            // 创建单例窗口。
+            // 这里必须使用非模态窗口：模态窗口会禁用本进程的所有窗口，
+            // 导致桌面上的分区在分区管理窗口打开期间完全无法操作。
+            SingletonWindowManager.Instance.ShowWindow<PartitionManagerWindow>(createFunc, false);
         }
 
         private void Exit()

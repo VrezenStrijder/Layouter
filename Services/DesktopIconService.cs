@@ -337,6 +337,19 @@ namespace Layouter.Services
         /// <returns></returns>
         public bool HideDesktopIcon(string filePath)
         {
+            return HideDesktopIcon(filePath, out _);
+        }
+
+        /// <summary>
+        /// 隐藏桌面上的文件图标，并返回其在安全存储中的真实存放路径
+        /// </summary>
+        /// <param name="filePath">桌面上的原始路径</param>
+        /// <param name="storedPath">隐藏后在安全存储中的存放路径（系统图标返回原路径）</param>
+        /// <returns>是否隐藏成功</returns>
+        public bool HideDesktopIcon(string filePath, out string storedPath)
+        {
+            storedPath = filePath;
+
             try
             {
                 if (string.IsNullOrEmpty(filePath))
@@ -361,10 +374,11 @@ namespace Layouter.Services
                 }
 
                 // 移入安全隐藏存储：桌面命名空间中不再留下任何隐藏目录，
-                // 存放名称使用哈希摘要，路径映射索引写入宿主文件的 ADS 数据流。
-                if (SecureHiddenStore.Instance.Hide(filePath, out string storedPath))
+                // 存放名称使用哈希摘要，路径映射索引写入宿主文件的索引文件。
+                if (SecureHiddenStore.Instance.Hide(filePath, out string hiddenPath))
                 {
-                    Log.Information($"成功隐藏桌面图标: {filePath} -> {Path.GetFileName(storedPath)}");
+                    storedPath = hiddenPath;
+                    Log.Information($"成功隐藏桌面图标: {filePath} -> {Path.GetFileName(hiddenPath)}");
                     RefreshDesktop();
                     return true;
                 }

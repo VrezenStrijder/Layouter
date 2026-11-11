@@ -941,7 +941,7 @@ namespace Layouter.Plugins.Views
             if (style == null) style = new PluginStyle();
 
             // 更新样式对象
-            style.WindowPosition = new Models.WindowPositionDto(Left, Top, Width, Height);
+            style.WindowPosition = new Layouter.Models.WindowPositionDto(Left, Top, Width, Height);
             style.Opacity = Opacity;
 
             // 更新颜色列表

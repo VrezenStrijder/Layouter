@@ -1,23 +1,43 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+﻿using System.IO;
 using System.Text.Json;
-using System.Threading.Tasks;
 
-namespace Layouter.Plugins.Models
+namespace PluginEntry
 {
     public class IconDescriptor
     {
-        private Dictionary<string, string> _iconPaths = new Dictionary<string, string>();
+        private Dictionary<string, string> iconPaths = new Dictionary<string, string>();
 
-        public IReadOnlyDictionary<string, string> IconPaths => _iconPaths;
+        public IReadOnlyDictionary<string, string> IconPaths => iconPaths;
 
         public static IconDescriptor FromJson(string json)
         {
             var descriptor = new IconDescriptor();
-            descriptor._iconPaths = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+            descriptor.iconPaths = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
             return descriptor;
+        }
+
+        public void ResolveRelativePaths(string baseDirectory)
+        {
+            if (string.IsNullOrWhiteSpace(baseDirectory) || iconPaths == null)
+            {
+                return;
+            }
+
+            foreach (var key in iconPaths.Keys.ToList())
+            {
+                var value = iconPaths[key];
+                if (string.IsNullOrWhiteSpace(value) ||
+                    value.StartsWith("::", StringComparison.Ordinal) ||
+                    Uri.TryCreate(value, UriKind.Absolute, out _))
+                {
+                    continue;
+                }
+
+                if (!Path.IsPathRooted(value))
+                {
+                    iconPaths[key] = Path.Combine(baseDirectory, value.TrimStart('.', '\\', '/'));
+                }
+            }
         }
     }
 

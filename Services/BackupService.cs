@@ -9,6 +9,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Layouter.Models;
+using Layouter.Utility;
+using Layouter.ViewModels;
 
 namespace Layouter.Services
 {
@@ -28,6 +30,26 @@ namespace Layouter.Services
 
         /// <summary>还原前自动创建的安全快照文件名前缀</summary>
         private const string SafetySnapshotPrefix = "pre-restore_";
+
+        /// <summary>
+        /// 判断指定备份文件是否为「还原前自动快照」
+        /// </summary>
+        public static bool IsSafetySnapshotFile(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+            {
+                return false;
+            }
+
+            try
+            {
+                return Path.GetFileName(filePath).StartsWith(SafetySnapshotPrefix, StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
 
         private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions { WriteIndented = true };
 
@@ -228,22 +250,35 @@ namespace Layouter.Services
                 }
 
                 // 1) 还原前自动创建安全快照
-                try
+                //    从「还原前自动快照」还原时不再重复生成快照，
+                //    否则每次还原安全快照都会再产生一个同名快照，备份列表会越积越多。
+                if (!backup.IsSafetySnapshot)
                 {
-                    string snapshotPath = Path.Combine(root, $"{SafetySnapshotPrefix}{DateTime.Now:yyyyMMdd-HHmmss}.zip");
-                    WriteArchive(snapshotPath, "还原前自动快照", "还原前自动创建的安全快照", root);
-                    result.SnapshotPath = snapshotPath;
-                    Log.Information($"已创建还原前安全快照: {snapshotPath}");
+                    try
+                    {
+                        string snapshotPath = Path.Combine(root, $"{SafetySnapshotPrefix}{DateTime.Now:yyyyMMdd-HHmmss}.zip");
+                        WriteArchive(snapshotPath, "还原前自动快照", "还原前自动创建的安全快照", root);
+                        result.SnapshotPath = snapshotPath;
+                        Log.Information($"已创建还原前安全快照: {snapshotPath}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Information($"创建还原前安全快照失败: {ex.Message}");
+                        result.ErrorMessage = $"创建还原前安全快照失败：{ex.Message}";
+                        return result;
+                    }
                 }
-                catch (Exception ex)
+                else
                 {
-                    Log.Information($"创建还原前安全快照失败: {ex.Message}");
-                    result.ErrorMessage = $"创建还原前安全快照失败：{ex.Message}";
-                    return result;
+                    Log.Information("还原目标本身是安全快照，跳过再次生成快照");
                 }
 
                 // 2) 读取归档内容
                 var entries = new Dictionary<string, ZipArchiveEntry>(StringComparer.OrdinalIgnoreCase);
+
+                // 还原前的隐藏存储索引快照（读取归档内容之前抓取）
+                HiddenStoreIndex? preRestoreIndex = null;
+
                 using (FileStream stream = new FileStream(backup.FilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
                 using (var archive = new ZipArchive(stream, ZipArchiveMode.Read))
                 {
@@ -279,6 +314,12 @@ namespace Layouter.Services
                         return result;
                     }
 
+                    // 还原前的隐藏存储索引快照。
+                    // 备份之后再隐藏的图标不在备份包里，若直接用备份的索引覆盖，
+                    // 这些图标就会失去「原始路径 ↔ 存放路径」的映射，既无法回到桌面，
+                    // 也无法在分区中正常显示，因此还原时必须与备份索引合并。
+                    preRestoreIndex = SecureHiddenStore.Instance.GetIndexSnapshot();
+
                     // 3) 覆盖写入配置数据
                     foreach (KeyValuePair<string, ZipArchiveEntry> pair in entries)
                     {
@@ -302,9 +343,21 @@ namespace Layouter.Services
                         }
 
                         using (Stream source = pair.Value.Open())
-                        using (FileStream target = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None))
                         {
-                            source.CopyTo(target);
+                            // 隐藏存储中的文件可能带有「系统 / 只读」属性，
+                            // Windows 会因此拒绝以写入方式打开，必须先解除
+                            SecureHiddenStore.ClearProtectedAttributes(destination);
+
+                            using (FileStream target = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None))
+                            {
+                                source.CopyTo(target);
+                            }
+                        }
+
+                        // 还原回隐藏存储的文件继续保持隐藏状态
+                        if (IsHiddenStoreRelative(pair.Key))
+                        {
+                            TryHideRestoredFile(destination);
                         }
                     }
                 }
@@ -319,6 +372,13 @@ namespace Layouter.Services
 
                     string relative = Path.GetRelativePath(configDirectory, file);
                     if (entries.ContainsKey(relative))
+                    {
+                        continue;
+                    }
+
+                    // 隐藏存储目录整体保留：备份之后再隐藏的图标不能被旧备份删除，
+                    // 否则这些图标既不在还原后的分区里、也回不到桌面，等于凭空消失
+                    if (IsHiddenStoreRelative(relative))
                     {
                         continue;
                     }
@@ -355,6 +415,18 @@ namespace Layouter.Services
                     }
                 }
 
+                // 6) 合并隐藏存储索引（备份之后再隐藏的图标保留映射）
+                MergeHiddenStoreIndex(preRestoreIndex);
+
+                // 7) 重新加载隐藏存储索引（索引文件已随备份一起还原）
+                SecureHiddenStore.Instance.ReloadIndex();
+
+                // 8) 还原后不再被任何分区引用的隐藏图标，统统恢复到桌面，避免文件被永久藏起来
+                result.RestoredToDesktopCount = RestoreOrphanedIcons();
+
+                // 9) 让运行中的分区窗口与还原后的配置保持一致（消除残留的空壳图标）
+                result.RemovedInvalidIconCount = ReloadPartitionWindows();
+
                 result.Success = true;
                 Log.Information($"已从备份还原配置: {backup.FilePath}");
                 return result;
@@ -366,6 +438,275 @@ namespace Layouter.Services
                 result.ErrorMessage = ex.Message;
                 return result;
             }
+        }
+
+        /// <summary>
+        /// 把还原回隐藏存储的文件重新标记为隐藏
+        /// </summary>
+        private static void TryHideRestoredFile(string path)
+        {
+            try
+            {
+                if (!File.Exists(path))
+                {
+                    return;
+                }
+
+                FileAttributes attributes = File.GetAttributes(path);
+                File.SetAttributes(path, attributes | FileAttributes.Hidden);
+            }
+            catch
+            {
+                // 忽略
+            }
+        }
+
+        /// <summary>
+        /// 判断相对路径是否位于隐藏存储目录之内
+        /// </summary>
+        private static bool IsHiddenStoreRelative(string relativePath)
+        {
+            if (string.IsNullOrEmpty(relativePath))
+            {
+                return false;
+            }
+
+            string normalized = relativePath.Replace('/', Path.DirectorySeparatorChar);
+            string storeFolder = Env.HiddenStoreFolderName + Path.DirectorySeparatorChar;
+
+            return normalized.StartsWith(storeFolder, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// 合并隐藏存储索引
+        /// </summary>
+        /// <remarks>
+        /// 还原时备份包中的索引会覆盖磁盘上的索引，但备份之后再隐藏的图标不在备份包里，
+        /// 直接覆盖会让它们失去「原始路径 ↔ 存放路径」的映射，进而无法回到桌面。
+        /// 这里把「还原前索引中、且存放文件仍然存在」的记录补回索引，
+        /// 使这些图标在还原后能够被识别为孤立图标并自动回到桌面。
+        /// </remarks>
+        private void MergeHiddenStoreIndex(HiddenStoreIndex? preRestoreIndex)
+        {
+            try
+            {
+                var store = SecureHiddenStore.Instance;
+                string indexPath = store.FallbackIndexPath;
+
+                var merged = new HiddenStoreIndex
+                {
+                    Version = preRestoreIndex?.Version ?? 1
+                };
+
+                // 备份包中的索引（此时已随还原写入磁盘）
+                if (File.Exists(indexPath))
+                {
+                    try
+                    {
+                        string json = File.ReadAllText(indexPath);
+                        var loaded = JsonSerializer.Deserialize<HiddenStoreIndex>(json);
+                        if (loaded?.Entries != null)
+                        {
+                            merged.Entries.AddRange(loaded.Entries);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Information($"读取还原后的隐藏存储索引失败: {ex.Message}");
+                    }
+                }
+
+                if (preRestoreIndex?.Entries != null)
+                {
+                    foreach (HiddenStoreEntry entry in preRestoreIndex.Entries)
+                    {
+                        if (merged.Entries.Any(e => string.Equals(e.Id, entry.Id, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            continue;
+                        }
+
+                        string storedPath = Path.Combine(store.StoreRoot, entry.StoredName);
+                        if (!File.Exists(storedPath) && !Directory.Exists(storedPath))
+                        {
+                            // 存放文件已经不存在，无需保留映射
+                            continue;
+                        }
+
+                        merged.Entries.Add(entry);
+                    }
+                }
+
+                store.ReplaceIndex(merged);
+                Log.Information($"已合并隐藏存储索引，共 {merged.Entries.Count} 条记录");
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"合并隐藏存储索引失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 收集还原后各分区仍在引用的图标原始路径
+        /// </summary>
+        private static HashSet<string> CollectReferencedIconPaths()
+        {
+            var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            string configDirectory = ConfigDirectory;
+
+            if (string.IsNullOrEmpty(configDirectory) || !Directory.Exists(configDirectory))
+            {
+                return result;
+            }
+
+            var store = SecureHiddenStore.Instance;
+
+            foreach (string file in EnumerateFilesSafe(configDirectory))
+            {
+                if (!Path.GetFileName(file).StartsWith("partition_", StringComparison.OrdinalIgnoreCase)
+                    || !file.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    string json = File.ReadAllText(file);
+                    var data = JsonSerializer.Deserialize<PartitionDataDto>(json);
+                    if (data?.Icons == null)
+                    {
+                        continue;
+                    }
+
+                    foreach (var icon in data.Icons)
+                    {
+                        if (string.IsNullOrEmpty(icon.IconPath))
+                        {
+                            continue;
+                        }
+
+                        // 统一解析成原始路径再比较，兼容旧数据中直接保存存放路径的情况
+                        result.Add(store.ResolveOriginalPath(icon.IconPath));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Information($"读取分区配置失败({file}): {ex.Message}");
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// 把还原后不再被任何分区引用的隐藏图标恢复到桌面
+        /// </summary>
+        /// <returns>恢复到桌面的图标数量</returns>
+        private int RestoreOrphanedIcons()
+        {
+            try
+            {
+                var store = SecureHiddenStore.Instance;
+                var referenced = CollectReferencedIconPaths();
+                int count = 0;
+
+                foreach (var entry in store.GetIndexSnapshot().Entries)
+                {
+                    if (string.IsNullOrEmpty(entry.OriginalPath))
+                    {
+                        continue;
+                    }
+
+                    if (referenced.Contains(entry.OriginalPath))
+                    {
+                        // 仍然被某个分区引用，保持隐藏
+                        continue;
+                    }
+
+                    string storedPath = Path.Combine(store.StoreRoot, entry.StoredName);
+                    if (store.Restore(storedPath, out string restoredPath))
+                    {
+                        count++;
+                        Log.Information($"还原后已把不再被引用的图标恢复到桌面: {restoredPath}");
+                    }
+                }
+
+                if (count > 0)
+                {
+                    DesktopIconService.Instance.RefreshDesktop();
+                }
+
+                return count;
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"恢复孤立图标失败: {ex.Message}");
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// 让运行中的分区窗口与还原后的配置保持一致
+        /// </summary>
+        /// <returns>被清理的无效图标数量</returns>
+        private int ReloadPartitionWindows()
+        {
+            int removed = 0;
+
+            try
+            {
+                var windows = WindowManagerService.Instance.GetAllWindows();
+                var metadata = PartitionDataService.Instance.GetMetadata();
+                var restoredIds = new HashSet<string>(
+                    metadata?.WindowIds ?? new List<string>(),
+                    StringComparer.OrdinalIgnoreCase);
+
+                // 1) 关闭还原后已不存在的分区（关闭时不写回旧数据）
+                foreach (var window in windows.ToList())
+                {
+                    string windowId = window.WindowId ?? string.Empty;
+                    if (!string.IsNullOrEmpty(windowId) && restoredIds.Contains(windowId))
+                    {
+                        continue;
+                    }
+
+                    PartitionDataService.Instance.RemoveWindowMapping(window);
+                    WindowManagerService.Instance.UnregisterWindow(window);
+                    window.CloseWithoutSaving();
+                    Log.Information($"还原后关闭了已不存在的分区: {windowId}");
+                }
+
+                // 2) 重新加载仍然存在的分区
+                foreach (var window in WindowManagerService.Instance.GetAllWindows().ToList())
+                {
+                    if (string.IsNullOrEmpty(window.WindowId))
+                    {
+                        continue;
+                    }
+
+                    int before = (window.DataContext as DesktopManagerViewModel)?.Icons.Count ?? 0;
+                    PartitionDataService.Instance.LoadPartitionData(window, window.WindowId);
+                    int after = (window.DataContext as DesktopManagerViewModel)?.Icons.Count ?? 0;
+                    if (before > after)
+                    {
+                        removed += before - after;
+                    }
+                }
+
+                // 3) 创建还原后新增的分区
+                foreach (string windowId in restoredIds)
+                {
+                    if (WindowManagerService.Instance.GetWindowById(windowId) == null)
+                    {
+                        PartitionDataService.Instance.ShowWindow(windowId);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"还原后重载分区窗口失败: {ex.Message}");
+            }
+
+            return removed;
         }
 
         /// <summary>
@@ -471,7 +812,8 @@ namespace Layouter.Services
             var info = new BackupInfo
             {
                 FilePath = filePath,
-                Name = Path.GetFileName(filePath)
+                Name = Path.GetFileName(filePath),
+                IsSafetySnapshot = IsSafetySnapshotFile(filePath)
             };
 
             try
@@ -561,7 +903,19 @@ namespace Layouter.Services
 
             result.AddRange(files);
 
-            foreach (string child in EnumerateDirectoriesSafe(directory))
+            // 只递归直接子目录，否则嵌套目录中的文件会被重复收集
+            string[] children;
+            try
+            {
+                children = Directory.GetDirectories(directory);
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"读取子目录失败({directory}): {ex.Message}");
+                return;
+            }
+
+            foreach (string child in children)
             {
                 CollectFiles(child, result);
             }

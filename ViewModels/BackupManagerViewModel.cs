@@ -63,6 +63,7 @@ namespace Layouter.ViewModels
                 BackupInfo backup = SelectedBackup;
                 var builder = new StringBuilder();
                 builder.AppendLine($"名称：{backup.Name}");
+                builder.AppendLine($"类型：{backup.TypeText}");
                 builder.AppendLine($"备注：{backup.RemarkText}");
                 builder.AppendLine($"创建时间：{backup.CreatedAtText}");
                 builder.AppendLine($"应用版本：{(string.IsNullOrWhiteSpace(backup.AppVersion) ? "-" : backup.AppVersion)}");
@@ -174,8 +175,13 @@ namespace Layouter.ViewModels
                 return;
             }
 
+            // 还原安全快照时不会再自动生成新的快照，提示文案需要区分
+            string snapshotHint = SelectedBackup.IsSafetySnapshot
+                ? "该备份是还原前自动生成的安全快照，还原时不会再产生新的快照。"
+                : "还原前会自动在备份目录中保存一份安全快照。";
+
             MessageBoxResult confirm = AppMessageBox.Show(
-                $"确定要还原备份「{SelectedBackup.Name}」吗？\n\n还原会覆盖当前的分区与通用配置。\n还原前会自动在备份目录中保存一份安全快照。",
+                $"确定要还原备份「{SelectedBackup.Name}」吗？\n\n还原会覆盖当前的分区与通用配置。\n{snapshotHint}",
                 "确认还原", MessageBoxButton.YesNo, MessageBoxImage.Warning);
             if (confirm != MessageBoxResult.Yes)
             {
@@ -197,14 +203,19 @@ namespace Layouter.ViewModels
                 StatusMessage = "还原完成";
                 RefreshBackups();
 
-                MessageBoxResult restart = AppMessageBox.Show(
-                    "还原已完成。\n\n当前打开的分区窗口仍然显示还原前的内容，需要重启应用程序才能完全生效。\n\n是否立即重启 Layouter？",
-                    "还原完成", MessageBoxButton.YesNo, MessageBoxImage.Information);
-
-                if (restart == MessageBoxResult.Yes)
+                // 分区窗口已在还原过程中自动重载，这里只需汇总结果
+                var details = new System.Text.StringBuilder();
+                details.AppendLine("还原已完成，当前打开的分区已同步为还原后的内容。");
+                if (result.RestoredToDesktopCount > 0)
                 {
-                    RestartApplication();
+                    details.AppendLine($"有 {result.RestoredToDesktopCount} 个不再属于任何分区的图标已放回桌面。");
                 }
+                if (result.RemovedInvalidIconCount > 0)
+                {
+                    details.AppendLine($"已清理 {result.RemovedInvalidIconCount} 个目标文件已不存在的图标。");
+                }
+
+                AppToastService.Success("还原完成", details.ToString().Trim());
             }
             catch (Exception ex)
             {

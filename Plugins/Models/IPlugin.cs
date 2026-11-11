@@ -1,33 +1,23 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
-using System.Text;
-using System.Threading.Tasks;
-using System.Windows.Controls;
-
-namespace Layouter.Plugins
+﻿namespace PluginEntry
 {
-    //public interface IPlugin
-    //{
-    //    string Name { get; }
-    //    void Load();
-    //    IReadOnlyDictionary<string, Action<object>> GetFunctions();
-    //    void Run(string functionKey, object arg);
-    //}
 
     public interface IPlugin
     {
         string Name { get; }
-        void Load();
-        IReadOnlyDictionary<string, Func<dynamic, object>> GetFunctions();
-        object Run(string functionKey, dynamic parameters);
+
+        void Register();
+
+        void Unregister();
+
+        Dictionary<string, Func<PluginParameter[], object>> FunctionDict { get; }
+
+        //object Run(string functionKey, dynamic parameters);
+        object Run(string functionKey, params PluginParameter[] parameters);
 
         /// <summary>
         /// 获取参数描述
         /// </summary>
-        Dictionary<string, List<ParameterInfo>> GetParameterDescriptions();
+        Dictionary<string, List<PluginParameter>> GetParameterDescriptions();
     }
-
 
 }

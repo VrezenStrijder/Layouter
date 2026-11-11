@@ -158,6 +158,7 @@ namespace Layouter.Services
                     adsAvailable = AlternateDataStream.IsSupportedInDirectory(StoreRoot);
                     LoadIndex();
                     MigrateLegacyStore();
+                    TryRecoverOrphanEntries();
                 }
                 catch (Exception ex)
                 {
@@ -187,8 +188,13 @@ namespace Layouter.Services
         }
 
         /// <summary>
-        /// 为路径附加「隐藏 + 系统」属性
+        /// 为路径附加「隐藏」属性（目录额外附加「系统」属性）
         /// </summary>
+        /// <remarks>
+        /// 注意：Windows 会对带「系统」属性的文件拒绝以写入方式打开，
+        /// 这会让备份还原时无法覆盖隐藏存储中的文件（Access denied）。
+        /// 因此「系统」属性只用于目录，文件一律只设置「隐藏」。
+        /// </remarks>
         private static void ApplyHiddenAttributes(string path, bool isDirectory)
         {
             try
@@ -199,11 +205,17 @@ namespace Layouter.Services
                 }
 
                 FileAttributes attributes = File.GetAttributes(path);
-                attributes |= FileAttributes.Hidden | FileAttributes.System;
+                attributes |= FileAttributes.Hidden;
 
                 if (isDirectory)
                 {
-                    attributes |= FileAttributes.Directory;
+                    attributes |= FileAttributes.System;
+                }
+                else
+                {
+                    // 解除历史遗留的「系统」属性，否则该文件无法被覆盖写入
+                    attributes &= ~FileAttributes.System;
+                    attributes &= ~FileAttributes.ReadOnly;
                 }
 
                 File.SetAttributes(path, attributes);
@@ -214,11 +226,56 @@ namespace Layouter.Services
             }
         }
 
+        /// <summary>
+        /// 解除「隐藏 / 系统 / 只读」属性，便于覆盖写入或删除
+        /// </summary>
+        internal static void ClearProtectedAttributes(string path)
+        {
+            try
+            {
+                if (!File.Exists(path) && !Directory.Exists(path))
+                {
+                    return;
+                }
+
+                FileAttributes attributes = File.GetAttributes(path);
+                FileAttributes masked = attributes
+                    & ~(FileAttributes.Hidden | FileAttributes.System | FileAttributes.ReadOnly);
+
+                if (masked != attributes)
+                {
+                    File.SetAttributes(path, masked);
+                }
+            }
+            catch
+            {
+                // 忽略
+            }
+        }
+
+        /// <summary>
+        /// 安全地覆盖写入文件
+        /// </summary>
+        /// <remarks>
+        /// Windows 会对带「隐藏 / 系统」属性的文件拒绝以 <see cref="FileMode.Create"/> 打开，
+        /// 因此写入前必须先解除这些属性，否则索引无法更新、备份也无法还原。
+        /// </remarks>
+        internal static void WriteAllBytesSafe(string path, byte[] payload)
+        {
+            ClearProtectedAttributes(path);
+            File.WriteAllBytes(path, payload);
+        }
+
         #region 索引读写
 
         /// <summary>
-        /// 读取索引（优先读取 ADS，失败则退回普通文件）
+        /// 读取索引（以普通索引文件为主，ADS 作为兼容旧版本的备用来源）
         /// </summary>
+        /// <remarks>
+        /// 索引必须以「普通文件」形式保存：ADS 无法被目录枚举，
+        /// 备份时不会被打包、还原时也会被空文件覆盖导致索引丢失，
+        /// 分区图标会因此变成无法使用的空壳。ADS 仅作为镜像保留一份。
+        /// </remarks>
         private void LoadIndex()
         {
             index = new HiddenStoreIndex();
@@ -227,14 +284,14 @@ namespace Layouter.Services
             {
                 byte[] payload = null;
 
-                if (adsAvailable)
-                {
-                    payload = AlternateDataStream.TryRead(HostFilePath, IndexStreamName);
-                }
-
-                if (payload == null && File.Exists(FallbackIndexPath))
+                if (File.Exists(FallbackIndexPath))
                 {
                     payload = File.ReadAllBytes(FallbackIndexPath);
+                }
+
+                if ((payload == null || payload.Length == 0) && adsAvailable)
+                {
+                    payload = AlternateDataStream.TryRead(HostFilePath, IndexStreamName);
                 }
 
                 if (payload == null || payload.Length == 0)
@@ -259,6 +316,9 @@ namespace Layouter.Services
         /// <summary>
         /// 保存索引
         /// </summary>
+        /// <remarks>
+        /// 索引主体写入普通文件（可被备份 / 还原），同时尽力写一份 ADS 镜像。
+        /// </remarks>
         private void SaveIndex()
         {
             try
@@ -267,20 +327,74 @@ namespace Layouter.Services
 
                 byte[] payload = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(index, new JsonSerializerOptions { WriteIndented = true }));
 
-                if (adsAvailable && AlternateDataStream.TryWrite(HostFilePath, IndexStreamName, payload))
-                {
-                    // ADS 写入成功后，清理可能残留的降级索引文件
-                    TryDeleteFile(FallbackIndexPath);
-                    return;
-                }
+                // 索引主体：普通文件，保证能被备份与还原
+                WriteAllBytesSafe(FallbackIndexPath, payload);
 
-                // 卷不支持 ADS 时降级为普通文件
-                adsAvailable = false;
-                File.WriteAllBytes(FallbackIndexPath, payload);
+                // ADS 镜像：仅作冗余备份，失败不影响主流程
+                if (adsAvailable)
+                {
+                    AlternateDataStream.TryWrite(HostFilePath, IndexStreamName, payload);
+                }
             }
             catch (Exception ex)
             {
                 Log.Information($"保存隐藏存储索引失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 从磁盘重新加载索引（还原备份后调用，使索引与还原后的存储目录保持一致）
+        /// </summary>
+        public void ReloadIndex()
+        {
+            lock (syncRoot)
+            {
+                initialized = false;
+                EnsureInitialized();
+                Log.Information($"已重新加载隐藏存储索引，记录数: {index.Entries.Count}");
+            }
+        }
+
+        /// <summary>
+        /// 用新的索引覆盖当前索引并立即保存
+        /// </summary>
+        /// <remarks>
+        /// 还原备份时需要把「备份中的索引」与「还原前索引中仍然有效的记录」合并，
+        /// 合并结果通过本方法写回磁盘，再调用 <see cref="ReloadIndex"/> 重新载入。
+        /// </remarks>
+        public void ReplaceIndex(HiddenStoreIndex newIndex)
+        {
+            lock (syncRoot)
+            {
+                EnsureInitialized();
+
+                index = newIndex ?? new HiddenStoreIndex();
+                SaveIndex();
+            }
+        }
+
+        /// <summary>
+        /// 获取当前索引的快照（供备份 / 诊断使用）
+        /// </summary>
+        public HiddenStoreIndex GetIndexSnapshot()
+        {
+            EnsureInitialized();
+            lock (syncRoot)
+            {
+                return new HiddenStoreIndex
+                {
+                    Version = index.Version,
+                    Entries = index.Entries.Select(e => new HiddenStoreEntry
+                    {
+                        Id = e.Id,
+                        OriginalPath = e.OriginalPath,
+                        StoredName = e.StoredName,
+                        DisplayName = e.DisplayName,
+                        IsDirectory = e.IsDirectory,
+                        CreatedAt = e.CreatedAt,
+                        Size = e.Size
+                    }).ToList()
+                };
             }
         }
 
@@ -569,10 +683,12 @@ namespace Layouter.Services
                 // 目标位置残留时先清理
                 if (Directory.Exists(target))
                 {
+                    ClearProtectedAttributes(target);
                     Directory.Delete(target, true);
                 }
                 else if (File.Exists(target))
                 {
+                    ClearProtectedAttributes(target);
                     File.Delete(target);
                 }
 
@@ -805,6 +921,220 @@ namespace Layouter.Services
             {
                 return 0;
             }
+        }
+
+        #endregion
+
+        #region 孤立条目恢复
+
+        /// <summary>
+        /// 为隐藏存储中「没有索引记录」的孤立文件重新建立映射
+        /// </summary>
+        /// <remarks>
+        /// 早期版本把索引只写在宿主文件的备用数据流里，备份 / 还原一旦覆盖宿主文件，
+        /// 索引就会彻底丢失，隐藏存储中的文件从此既不知道原始路径，也无法回到桌面，
+        /// 分区里只会留下一个打不开的「默认图标」。
+        /// <para>
+        /// 存放名称是原始路径哈希的前缀，因此可以反过来在桌面上重新匹配：
+        /// 对桌面上每个条目计算同样的哈希，命中即说明该文件就是被隐藏的那一个，
+        /// 从而重建索引记录，让图标恢复正常显示或回到桌面。
+        /// </para>
+        /// </remarks>
+        /// <returns>恢复的记录数量</returns>
+        public int TryRecoverOrphanEntries()
+        {
+            lock (syncRoot)
+            {
+                EnsureInitialized();
+
+                try
+                {
+                    if (!Directory.Exists(StoreRoot))
+                    {
+                        return 0;
+                    }
+
+                    var orphans = new List<string>();
+                    foreach (string file in Directory.GetFiles(StoreRoot))
+                    {
+                        if (!IsStoreMetadataFile(file))
+                        {
+                            orphans.Add(file);
+                        }
+                    }
+
+                    foreach (string directory in Directory.GetDirectories(StoreRoot))
+                    {
+                        orphans.Add(directory);
+                    }
+
+                    if (orphans.Count == 0)
+                    {
+                        return 0;
+                    }
+
+                    var candidates = BuildDesktopPathCandidates();
+                    if (candidates.Count == 0)
+                    {
+                        return 0;
+                    }
+
+                    int recovered = 0;
+
+                    foreach (string orphan in orphans)
+                    {
+                        string storedName = Path.GetFileName(orphan.TrimEnd(Path.DirectorySeparatorChar));
+                        string id = Path.GetFileNameWithoutExtension(storedName);
+
+                        if (string.IsNullOrEmpty(id))
+                        {
+                            continue;
+                        }
+
+                        if (index.Entries.Any(e => string.Equals(e.Id, id, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            continue;
+                        }
+
+                        if (!candidates.TryGetValue(id, out string originalPath))
+                        {
+                            continue;
+                        }
+
+                        bool isDirectory = Directory.Exists(orphan);
+
+                        // 扩展名必须一致，避免哈希前缀偶然相同导致误配
+                        if (!isDirectory && !string.Equals(
+                                Path.GetExtension(orphan),
+                                Path.GetExtension(originalPath),
+                                StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        var entry = new HiddenStoreEntry
+                        {
+                            Id = id,
+                            OriginalPath = originalPath,
+                            StoredName = storedName,
+                            DisplayName = isDirectory
+                                ? new DirectoryInfo(originalPath).Name
+                                : Path.GetFileName(originalPath),
+                            IsDirectory = isDirectory,
+                            CreatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                            Size = isDirectory ? GetDirectorySize(orphan) : GetFileSize(orphan)
+                        };
+
+                        index.Entries.Add(entry);
+                        recovered++;
+
+                        Log.Information($"已从桌面重新匹配到孤立文件: {storedName} -> {originalPath}");
+                    }
+
+                    if (recovered > 0)
+                    {
+                        SaveIndex();
+                        Log.Information($"已恢复 {recovered} 条孤立隐藏记录的索引");
+                    }
+
+                    return recovered;
+                }
+                catch (Exception ex)
+                {
+                    Log.Information($"恢复孤立隐藏记录失败: {ex.Message}");
+                    return 0;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 判断文件是否为隐藏存储自身的元数据文件（索引 / 宿主文件）
+        /// </summary>
+        private bool IsStoreMetadataFile(string path)
+        {
+            string name = Path.GetFileName(path);
+            return string.Equals(name, Env.HiddenStoreIndexFileName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(name, Env.HiddenStoreHostFileName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// 扫描桌面上的所有条目，建立「哈希前缀 → 原始路径」的候选表
+        /// </summary>
+        private Dictionary<string, string> BuildDesktopPathCandidates()
+        {
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            var desktopDirectories = new List<string>();
+            try
+            {
+                desktopDirectories.Add(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory));
+                desktopDirectories.Add(Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory));
+            }
+            catch
+            {
+                // 忽略
+            }
+
+            foreach (string desktop in desktopDirectories.Where(d => !string.IsNullOrEmpty(d) && Directory.Exists(d)).Distinct())
+            {
+                foreach (string file in SafeEnumerateFiles(desktop))
+                {
+                    string id = ComputeId(file);
+                    if (!string.IsNullOrEmpty(id) && !result.ContainsKey(id))
+                    {
+                        result[id] = file;
+                    }
+                }
+
+                foreach (string directory in SafeEnumerateDirectories(desktop))
+                {
+                    string id = ComputeId(directory);
+                    if (!string.IsNullOrEmpty(id) && !result.ContainsKey(id))
+                    {
+                        result[id] = directory;
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        private static List<string> SafeEnumerateFiles(string root)
+        {
+            var result = new List<string>();
+
+            try
+            {
+                foreach (string file in Directory.GetFiles(root, "*", SearchOption.AllDirectories))
+                {
+                    result.Add(file);
+                }
+            }
+            catch
+            {
+                // 忽略无权限的目录
+            }
+
+            return result;
+        }
+
+        private static List<string> SafeEnumerateDirectories(string root)
+        {
+            var result = new List<string>();
+
+            try
+            {
+                foreach (string directory in Directory.GetDirectories(root, "*", SearchOption.AllDirectories))
+                {
+                    result.Add(directory);
+                }
+            }
+            catch
+            {
+                // 忽略无权限的目录
+            }
+
+            return result;
         }
 
         #endregion

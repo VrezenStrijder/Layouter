@@ -20,6 +20,7 @@
         ResizeMode="CanResizeWithGrip"
         MouseEnter="Window_MouseEnter"
         MouseLeave="Window_MouseLeave"
+        PreviewKeyDown="Window_PreviewKeyDown"
         ShowInTaskbar="False">
 
     <Window.Resources>
@@ -141,13 +142,31 @@
                                 </TextBlock>
 
                                 <!-- 标题编辑框 -->
-                                <TextBox x:Name="TitleEditBox" Visibility="Collapsed" Margin="10,3" KeyDown="TitleEditBox_KeyDown" LostFocus="TitleEditBox_LostFocus"/>
+                                <!-- 显式指定紧凑尺寸：全局文本框样式带「最小高度 32 + 内边距 10,5」，
+                                     在 32 像素高的标题栏里会把文字裁掉一半，因此这里单独收敛高度与内边距 -->
+                                <TextBox x:Name="TitleEditBox"
+                                         Visibility="Collapsed"
+                                         Margin="8,0"
+                                         Height="26"
+                                         MinHeight="0"
+                                         MaxHeight="26"
+                                         Padding="4,0"
+                                         FontSize="13"
+                                         VerticalAlignment="Center"
+                                         VerticalContentAlignment="Center"
+                                         KeyDown="TitleEditBox_KeyDown"
+                                         LostFocus="TitleEditBox_LostFocus"/>
                             </Grid>
                             <!-- 功能按钮区域 -->
                             <StackPanel Orientation="Horizontal" Grid.Column="1" VerticalAlignment="Center" Margin="0,0,4,0">
                                 <!-- 新增分区按钮 -->
                                 <Button Style="{StaticResource TitleBarButtonStyle}" ToolTip="新建分区" Click="NewPartition_Click" x:Name="NewPartitionButton">
                                     <FluentIcons:SymbolIcon Symbol="Add" FontSize="16" Foreground="{Binding TitleForeground}" />
+                                </Button>
+
+                                <!-- 图标显示方式切换（网格 / 列表） -->
+                                <Button Style="{StaticResource TitleBarButtonStyle}" ToolTip="切换图标显示方式" Click="ToggleIconViewMode_Click" x:Name="IconViewModeButton">
+                                    <FluentIcons:SymbolIcon x:Name="IconViewModeIcon" Symbol="Grid" FontSize="16" Foreground="{Binding TitleForeground}" />
                                 </Button>
 
                                 <!-- 锁定按钮 -->
@@ -183,19 +202,30 @@
                 </Border>
 
                 <!-- 图标区域 -->
-                <Border x:Name="IconsContainer" Grid.Row="1" Background="{Binding ContentBackground}" CornerRadius="0,0,8,8">
-                    <ItemsControl ItemsSource="{Binding Icons}" Margin="5,5,5,5"
+                <Border x:Name="IconsContainer" Grid.Row="1" Background="{Binding ContentBackground}" CornerRadius="0,0,8,0">
+                    <Grid>
+                        <!-- 网格视图：图标排成方阵，数量过多时通过垂直滚动条查看 -->
+                        <ScrollViewer x:Name="IconsScrollViewer"
+                                      Background="{Binding BackgroundColor}"
+                                      VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Hidden"
+                                      Visibility="{Binding IsGridView, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <ItemsControl ItemsSource="{Binding Icons}" Margin="5,5,5,5"
                      AllowDrop="True" Background="Transparent"
+                     HorizontalContentAlignment="Stretch"
                      x:Name="iconsContainer"
                      PreviewMouseLeftButtonDown="IconsContainer_PreviewMouseLeftButtonDown"
                      PreviewMouseMove="IconsContainer_PreviewMouseMove"
                      Drop="IconsContainer_Drop"
                      ContextMenu="{StaticResource PartitionContextMenu}">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <Canvas IsItemsHost="True" Background="{Binding BackgroundColor}"/>
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <!-- Canvas 不会自行累加子元素位置，必须显式给出内容高度，
+                                             否则滚动容器计算不出可滚动范围，垂直滚动条不会出现 -->
+                                        <Canvas IsItemsHost="True"
+                                                Height="{Binding IconsContentHeight}"/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
 
                         <ItemsControl.ItemContainerStyle>
                             <Style TargetType="ContentPresenter">
@@ -221,6 +251,9 @@
                                                     <Setter Property="Background" Value="#1FFFFFFF"/>
                                                     <Setter Property="Cursor" Value="Hand"/>
                                                 </Trigger>
+                                                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                    <Setter Property="Background" Value="#33FFFFFF"/>
+                                                </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
                                     </Border.Style>
@@ -239,9 +272,11 @@
                                                     </MultiBinding>
                                                 </Image.Source>
                                             </Image>
-                                            <!-- 文件名称：白色文字 + 深色投影，保证在深色/浅色壁纸上都清晰可读 -->
-                                            <TextBlock Text="{Binding Name}"
+                                            <!-- 文件名称：过长时自动截断，完整名称通过 Tooltip 查看 -->
+                                            <TextBlock Text="{Binding DisplayName}"
+                                                       ToolTip="{Binding Name}"
                                                        TextWrapping="Wrap"
+                                                       TextTrimming="CharacterEllipsis"
                                                        TextAlignment="Center"
                                                        FontSize="{Binding TextSize}"
                                                        MaxWidth="60"
@@ -253,13 +288,190 @@
                                                                       Opacity="0.9"
                                                                       RenderingBias="Quality"/>
                                                 </TextBlock.Effect>
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsRenaming}" Value="True">
+                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
                                             </TextBlock>
+
+                                                    <!-- 重命名编辑框：F2 或选中后单击进入 -->
+                                                    <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}"
+                                                             FontSize="{Binding TextSize}"
+                                                             MaxWidth="72"
+                                                             MinHeight="0"
+                                                             Height="22"
+                                                             Padding="2,0"
+                                                             HorizontalAlignment="Center"
+                                                             TextAlignment="Center"
+                                                     BorderBrush="{StaticResource AppAccentBrush}"
+                                                     Background="{StaticResource AppSurfaceBrush}"
+                                                     Foreground="{StaticResource AppTextBrush}"
+                                                     KeyDown="IconRenameBox_KeyDown"
+                                                     LostFocus="IconRenameBox_LostFocus"
+                                                     Loaded="IconRenameBox_Loaded">
+                                                <TextBox.Style>
+                                                    <Style TargetType="TextBox">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsRenaming}" Value="True">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBox.Style>
+                                            </TextBox>
                                         </StackPanel>
                                     </Grid>
                                 </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                            </ItemsControl>
+                        </ScrollViewer>
+
+                        <!-- 列表视图：图标与名称同行排列，逐行展示 -->
+                        <ScrollViewer x:Name="IconsListScrollViewer"
+                                      Background="{Binding BackgroundColor}"
+                                      VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      Visibility="{Binding IsListView, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <ItemsControl ItemsSource="{Binding Icons}" Margin="5,5,5,5"
+                             AllowDrop="True" Background="Transparent"
+                             HorizontalContentAlignment="Stretch"
+                             x:Name="iconsListContainer"
+                             PreviewMouseLeftButtonDown="IconsContainer_PreviewMouseLeftButtonDown"
+                             PreviewMouseMove="IconsContainer_PreviewMouseMove"
+                             Drop="IconsContainer_Drop"
+                             ContextMenu="{StaticResource PartitionContextMenu}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel IsItemsHost="True"/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border x:Name="IconHighlight"
+                                                CornerRadius="6"
+                                                Padding="6,3"
+                                                MinHeight="30"
+                                                Tag="{Binding}"
+                                                MouseLeftButtonDown="Icon_MouseDown"
+                                                MouseLeftButtonUp="Icon_MouseUp">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="Background" Value="Transparent"/>
+                                                    <Setter Property="Cursor" Value="Arrow"/>
+                                                    <Style.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter Property="Background" Value="#1FFFFFFF"/>
+                                                            <Setter Property="Cursor" Value="Hand"/>
+                                                        </Trigger>
+                                                        <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                            <Setter Property="Background" Value="#33FFFFFF"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="2*"/>
+                                                </Grid.ColumnDefinitions>
+
+                                                <Image Grid.Column="0" Width="24" Height="24"
+                                                       Stretch="Uniform" Margin="0,0,8,0"
+                                                       RenderOptions.BitmapScalingMode="HighQuality">
+                                                    <Image.Source>
+                                                        <MultiBinding Converter="{StaticResource FilePathToIconConverter}">
+                                                            <Binding Path="IconPath"/>
+                                                            <Binding Path="Size"/>
+                                                        </MultiBinding>
+                                                    </Image.Source>
+                                                </Image>
+
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding Name}"
+                                                           ToolTip="{Binding Name}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           VerticalAlignment="Center"
+                                                           FontSize="{Binding TextSize}"
+                                                           Foreground="White">
+                                                    <TextBlock.Effect>
+                                                        <DropShadowEffect Color="Black"
+                                                                          BlurRadius="5"
+                                                                          ShadowDepth="1"
+                                                                          Opacity="0.9"
+                                                                          RenderingBias="Quality"/>
+                                                    </TextBlock.Effect>
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsRenaming}" Value="True">
+                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+
+                                                <!-- 文件路径：列表视图下显示图标对应的原始路径 -->
+                                                <TextBlock Grid.Column="2"
+                                                           Text="{Binding DisplayPath}"
+                                                           ToolTip="{Binding DisplayPath}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           VerticalAlignment="Center"
+                                                           FontSize="{Binding TextSize}"
+                                                           Foreground="#B3FFFFFF">
+                                                    <TextBlock.Effect>
+                                                        <DropShadowEffect Color="Black"
+                                                                          BlurRadius="5"
+                                                                          ShadowDepth="1"
+                                                                          Opacity="0.9"
+                                                                          RenderingBias="Quality"/>
+                                                    </TextBlock.Effect>
+                                                </TextBlock>
+
+                                                <!-- 重命名编辑框：F2 或选中后单击进入 -->
+                                                <TextBox Grid.Column="1"
+                                                         Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}"
+                                                         FontSize="{Binding TextSize}"
+                                                         MinHeight="0"
+                                                         Height="22"
+                                                         Padding="2,0"
+                                                         VerticalAlignment="Center"
+                                                         BorderBrush="{StaticResource AppAccentBrush}"
+                                                         Background="{StaticResource AppSurfaceBrush}"
+                                                         Foreground="{StaticResource AppTextBrush}"
+                                                         KeyDown="IconRenameBox_KeyDown"
+                                                         LostFocus="IconRenameBox_LostFocus"
+                                                         Loaded="IconRenameBox_Loaded">
+                                                    <TextBox.Style>
+                                                        <Style TargetType="TextBox">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsRenaming}" Value="True">
+                                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBox.Style>
+                                                </TextBox>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Grid>
 
                 </Border>
             </Grid>

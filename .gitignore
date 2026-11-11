@@ -2,3 +2,5 @@
 /.vs
 /bin
 /obj
+build_log.txt
+Layouter.csproj.user

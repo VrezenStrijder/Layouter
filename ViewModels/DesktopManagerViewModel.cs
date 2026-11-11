@@ -38,6 +38,7 @@ namespace Layouter.ViewModels
         private Size iconSizeValue = new Size(48, 48);
         private double iconTextSize = 12.0;
         private bool isLocked = false;
+        private IconViewMode iconViewMode = IconViewMode.Grid;
 
         private double partitionWidth = 400;
         private double partitionHeight = 300;
@@ -78,6 +79,68 @@ namespace Layouter.ViewModels
         {
             get => partitionHeight;
             set => SetProperty(ref partitionHeight, value);
+        }
+
+        private double iconsContentHeight;
+
+        /// <summary>
+        /// 图标内容区高度（网格视图）
+        /// </summary>
+        /// <remarks>
+        /// 网格视图使用 Canvas 排列图标，Canvas 自身不会根据子元素位置计算内容高度，
+        /// 滚动容器因此拿不到可滚动的范围。这里给出显式高度，保证图标过多时可以滚动查看。
+        /// </remarks>
+        public double IconsContentHeight
+        {
+            get => iconsContentHeight;
+            set => SetProperty(ref iconsContentHeight, value);
+        }
+
+        /// <summary>
+        /// 列表视图单行高度（与列表视图模板保持一致）
+        /// </summary>
+        public const double ListRowHeight = 30;
+
+        private double measuredItemHeight;
+
+        /// <summary>
+        /// 实测得到的图标项高度
+        /// </summary>
+        /// <remarks>
+        /// 图标名称过长时会换行，实际渲染高度比按图标尺寸估算的高度更大。
+        /// 视图层测量真实高度后回填到这里，排布与内容高度才能与实际显示一致，
+        /// 否则自动高度会算小了、进而出现本不该有的滚动条。
+        /// 为 0 表示尚未测量，按估算高度处理。
+        /// </remarks>
+        public double MeasuredItemHeight
+        {
+            get => measuredItemHeight;
+            set
+            {
+                if (Math.Abs(measuredItemHeight - value) < 0.5)
+                {
+                    return;
+                }
+
+                measuredItemHeight = value;
+                OnPropertyChanged(nameof(EffectiveItemHeight));
+            }
+        }
+
+        /// <summary>
+        /// 当前视图下单个图标项的实际占用高度
+        /// </summary>
+        public double EffectiveItemHeight
+        {
+            get
+            {
+                if (IsListView)
+                {
+                    return ListRowHeight;
+                }
+
+                return MeasuredItemHeight > 0 ? MeasuredItemHeight : IconAreaHeight;
+            }
         }
 
         public SolidColorBrush TitleForeground
@@ -202,6 +265,28 @@ namespace Layouter.ViewModels
 
         public bool IsRolledUp { get; set; } = false;
 
+        /// <summary>
+        /// 分区内图标的显示方式（网格 / 列表）
+        /// </summary>
+        public IconViewMode IconViewMode
+        {
+            get => iconViewMode;
+            set
+            {
+                if (SetProperty(ref iconViewMode, value))
+                {
+                    OnPropertyChanged(nameof(IsGridView));
+                    OnPropertyChanged(nameof(IsListView));
+                }
+            }
+        }
+
+        /// <summary>是否以网格方式显示图标</summary>
+        public bool IsGridView => IconViewMode == IconViewMode.Grid;
+
+        /// <summary>是否以列表方式显示图标</summary>
+        public bool IsListView => IconViewMode == IconViewMode.List;
+
         public IRelayCommand ArrangeIconsCommand { get; }
 
         public ICommand ToggleLockCommand { get; }
@@ -213,13 +298,16 @@ namespace Layouter.ViewModels
             double y = IconSpacing;
             double maxHeight = 0;
 
+            // 图标名称换行后实际高度会变大，这里按实测高度排布，避免行与行重叠
+            double itemHeight = EffectiveItemHeight;
+
             foreach (var icon in Icons)
             {
                 // 检查是否需要换行
                 if (x + IconAreaWidth + IconSpacing > PartitionWidth && x > IconSpacing)
                 {
                     x = IconSpacing;
-                    y += Math.Max(maxHeight + IconSpacing, IconAreaHeight);
+                    y += Math.Max(maxHeight + IconSpacing, itemHeight);
                     maxHeight = 0;
                 }
 
@@ -228,10 +316,44 @@ namespace Layouter.ViewModels
 
                 // 更新位置
                 x += IconAreaWidth + IconSpacing;
-                maxHeight = Math.Max(maxHeight, IconAreaHeight);
+                maxHeight = Math.Max(maxHeight, itemHeight);
             }
 
+            // 网格视图由 Canvas 承载图标，而 Canvas 不会自行累加子元素位置，
+            // 必须显式给出内容高度，垂直滚动条才能滚动到最后一个图标。
+            UpdateContentHeight();
+        }
 
+        /// <summary>
+        /// 依据当前图标位置计算图标内容区高度
+        /// </summary>
+        public void UpdateContentHeight()
+        {
+            // 列表视图由 StackPanel 逐行排列，行高固定
+            if (IsListView)
+            {
+                IconsContentHeight = Icons.Count * ListRowHeight;
+                return;
+            }
+
+            double bottom = 0;
+            double itemHeight = EffectiveItemHeight;
+
+            foreach (var icon in Icons)
+            {
+                if (icon == null)
+                {
+                    continue;
+                }
+
+                double iconBottom = icon.Position.Y + itemHeight;
+                if (iconBottom > bottom)
+                {
+                    bottom = iconBottom;
+                }
+            }
+
+            IconsContentHeight = Icons.Count == 0 ? 0 : bottom + IconSpacing;
         }
 
         public void SwitchLockState()
@@ -344,7 +466,7 @@ namespace Layouter.ViewModels
                 UpdateIconSize();
             }
 
-            return new Size(IconAreaWidth, IconAreaHeight);
+            return new Size(IconAreaWidth, EffectiveItemHeight);
         }
     }
 
@@ -353,6 +475,18 @@ namespace Layouter.ViewModels
         Small,
         Medium,
         Large
+    }
+
+    /// <summary>
+    /// 分区内图标的显示方式
+    /// </summary>
+    public enum IconViewMode
+    {
+        /// <summary>网格（图标在上、名称在下）</summary>
+        Grid = 0,
+
+        /// <summary>列表（图标在左、名称在右，逐行排列）</summary>
+        List = 1
     }
 
 }

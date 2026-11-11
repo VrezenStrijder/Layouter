@@ -7,10 +7,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Layouter", "Layouter.csproj
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "PluginLibs", "PluginLibs", "{F26E80D2-D0DF-4C56-8DF6-62DA9596C36E}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PluginEntry", "..\PluginEntry\PluginEntry.csproj", "{1465820D-C4FF-4B6D-9C98-1E362A0C3964}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Win32", "..\Win32\Win32.csproj", "{75E4E1EC-2E83-0F4F-B812-AB448C42E040}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -21,22 +17,11 @@ Global
 		{3A7A5DA1-AF62-4C79-9C3F-6EB3AB33976F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3A7A5DA1-AF62-4C79-9C3F-6EB3AB33976F}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{3A7A5DA1-AF62-4C79-9C3F-6EB3AB33976F}.Release|Any CPU.Build.0 = Release|Any CPU
-		{1465820D-C4FF-4B6D-9C98-1E362A0C3964}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{1465820D-C4FF-4B6D-9C98-1E362A0C3964}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{1465820D-C4FF-4B6D-9C98-1E362A0C3964}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{1465820D-C4FF-4B6D-9C98-1E362A0C3964}.Release|Any CPU.Build.0 = Release|Any CPU
-		{75E4E1EC-2E83-0F4F-B812-AB448C42E040}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{75E4E1EC-2E83-0F4F-B812-AB448C42E040}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{75E4E1EC-2E83-0F4F-B812-AB448C42E040}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{75E4E1EC-2E83-0F4F-B812-AB448C42E040}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
-	GlobalSection(NestedProjects) = preSolution
-		{1465820D-C4FF-4B6D-9C98-1E362A0C3964} = {F26E80D2-D0DF-4C56-8DF6-62DA9596C36E}
-	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
-		SolutionGuid = {175A435C-B336-444D-93EE-96D4EFA9B9E2}
+		SolutionGuid = {EC3C2AE7-9929-4941-8530-8E3A09FEC694}
 	EndGlobalSection
 EndGlobal

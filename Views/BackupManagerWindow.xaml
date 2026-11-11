@@ -150,13 +150,18 @@
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="名称"
                                                 Binding="{Binding Name}"
-                                                Width="1.3*"
-                                                MinWidth="160"
+                                                Width="1.2*"
+                                                MinWidth="150"
+                                                ElementStyle="{StaticResource AppTableCellText}"/>
+                            <DataGridTextColumn Header="类型"
+                                                Binding="{Binding TypeText}"
+                                                Width="84"
+                                                MinWidth="80"
                                                 ElementStyle="{StaticResource AppTableCellText}"/>
                             <DataGridTextColumn Header="备注"
                                                 Binding="{Binding RemarkText}"
-                                                Width="1.8*"
-                                                MinWidth="180"
+                                                Width="1.5*"
+                                                MinWidth="150"
                                                 ElementStyle="{StaticResource AppTableCellText}"/>
                             <DataGridTextColumn Header="创建时间"
                                                 Binding="{Binding CreatedAtText}"

@@ -39,7 +39,11 @@ namespace Layouter.Services
         /// 保存单个分区数据
         /// </summary>
         /// <param name="window"></param>
-        public void SavePartitionData(DesktopManagerWindow window)
+        /// <param name="heightOverride">
+        /// 写入配置的高度。窗口处于卷起状态时实际高度只有标题栏高度，
+        /// 此时应传入展开时的高度，否则下次启动分区会变成一条。
+        /// </param>
+        public void SavePartitionData(DesktopManagerWindow window, double? heightOverride = null)
         {
             try
             {
@@ -60,10 +64,13 @@ namespace Layouter.Services
                         Left = window.Left,
                         Top = window.Top,
                         Width = window.Width,
-                        Height = window.Height
+                        Height = heightOverride ?? window.Height
                     },
                     Icons = new List<IconDataDto>()
                 };
+
+                // 图标显示方式（网格 / 列表）
+                partitionData.IconViewMode = (int)viewModel.IconViewMode;
 
                 // 添加所有图标数据
                 foreach (var icon in viewModel.Icons)
@@ -74,7 +81,8 @@ namespace Layouter.Services
                         Name = icon.Name,
                         IconPath = DesktopIconService.Instance.RemoveHiddenPathInIconPath(icon.IconPath),
                         Position = new PointDto { X = icon.Position.X, Y = icon.Position.Y },
-                        Size = new SizeDto { Width = icon.Size.Width, Height = icon.Size.Height }
+                        Size = new SizeDto { Width = icon.Size.Width, Height = icon.Size.Height },
+                        IconType = (int)icon.IconType
                     });
                 }
 
@@ -428,16 +436,30 @@ namespace Layouter.Services
                         viewModel.Name = partitionData.Name;
                         viewModel.Icons.Clear();
 
+                        // 图标显示方式（网格 / 列表）
+                        viewModel.IconViewMode = ResolveIconViewMode(partitionData.IconViewMode);
+
                         // 添加所有图标
                         foreach (var iconData in partitionData.Icons)
                         {
+                            string iconPath = DesktopIconService.Instance.GetAvailableIconPath(iconData.IconPath);
+
+                            // 目标文件已不存在的图标直接跳过，
+                            // 否则分区里会出现「有名字但打不开」的空壳图标
+                            if (!IsIconTargetAvailable(iconPath))
+                            {
+                                Log.Information($"跳过无效图标（目标不存在）: {iconData.Name} -> {iconPath}");
+                                continue;
+                            }
+
                             var icon = new DesktopIcon
                             {
                                 Id = iconData.Id,
                                 Name = iconData.Name,
-                                IconPath = DesktopIconService.Instance.GetAvailableIconPath(iconData.IconPath),
+                                IconPath = iconPath,
                                 Position = new Point(iconData.Position.X, iconData.Position.Y),
-                                Size = new Size(iconData.Size.Width, iconData.Size.Height)
+                                Size = new Size(iconData.Size.Width, iconData.Size.Height),
+                                IconType = ResolveIconType(iconData)
                             };
 
                             viewModel.AddIcon(icon);
@@ -463,6 +485,19 @@ namespace Layouter.Services
             }
         }
 
+        /// <summary>
+        /// 解析图标的显示方式（未知值按网格处理）
+        /// </summary>
+        public static IconViewMode ResolveIconViewMode(int? iconViewMode)
+        {
+            if (iconViewMode.HasValue && Enum.IsDefined(typeof(IconViewMode), iconViewMode.Value))
+            {
+                return (IconViewMode)iconViewMode.Value;
+            }
+
+            return IconViewMode.Grid;
+        }
+
         public PartitionDataDto GetPartitionData(string windowId)
         {
             string filePath = Path.Combine(dataDirectory, $"partition_{windowId}.json");
@@ -473,6 +508,70 @@ namespace Layouter.Services
                 return JsonSerializer.Deserialize<PartitionDataDto>(json);
             }
             return null;
+        }
+
+        /// <summary>
+        /// 判断图标指向的目标是否可用
+        /// </summary>
+        private static bool IsIconTargetAvailable(string iconPath)
+        {
+            if (string.IsNullOrEmpty(iconPath))
+            {
+                return false;
+            }
+
+            // 系统图标（控制面板、此电脑等）是虚拟路径，始终视为可用
+            if (iconPath.StartsWith("::", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            try
+            {
+                return File.Exists(iconPath) || Directory.Exists(iconPath);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 解析图标的类别：优先使用已保存的类别，旧版数据缺失时按路径特征推断
+        /// </summary>
+        public static IconType ResolveIconType(IconDataDto iconData)
+        {
+            if (iconData?.IconType.HasValue == true)
+            {
+                return (IconType)iconData.IconType.Value;
+            }
+
+            string path = iconData?.IconPath ?? string.Empty;
+
+            if (path.StartsWith("::", StringComparison.Ordinal))
+            {
+                // 系统图标（控制面板、此电脑等）
+                return IconType.Shell;
+            }
+
+            if (path.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
+            {
+                return IconType.Shortcut;
+            }
+
+            try
+            {
+                if (Directory.Exists(path))
+                {
+                    return IconType.Folder;
+                }
+            }
+            catch
+            {
+                // 忽略
+            }
+
+            return IconType.File;
         }
 
         public WindowsMetadataDto GetMetadata()

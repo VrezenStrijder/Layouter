@@ -40,6 +40,50 @@ namespace Layouter.Views
             vm.UpdateSelectedPartition();
         }
 
+        /// <summary>
+        /// 双击分区行：打开该分区的编辑对话框
+        /// </summary>
+        private void DataGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            try
+            {
+                // 双击操作列上的按钮时不再重复打开编辑对话框
+                if (FindAncestor<Button>(e.OriginalSource as DependencyObject) != null)
+                {
+                    return;
+                }
+
+                var row = FindAncestor<DataGridRow>(e.OriginalSource as DependencyObject);
+                if (row?.Item is PartitionItemViewModel partition)
+                {
+                    e.Handled = true;
+                    vm.EditPartition(partition);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"双击打开分区编辑对话框时出错: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 从指定元素向上查找指定类型的祖先
+        /// </summary>
+        private static T FindAncestor<T>(DependencyObject element) where T : DependencyObject
+        {
+            while (element != null)
+            {
+                if (element is T match)
+                {
+                    return match;
+                }
+
+                element = VisualTreeHelper.GetParent(element);
+            }
+
+            return null;
+        }
+
         private void EditPartition_Click(object sender, RoutedEventArgs e)
         {
             var button = (Button)sender;

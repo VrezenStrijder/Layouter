@@ -38,8 +38,14 @@ namespace Layouter.Views
         private DesktopIcon lastClickedIcon = null;
         private const double DoubleClickTimeThreshold = 500; //毫秒
 
+        // 图标选中与重命名
+        private DesktopIcon selectedIcon = null;
+        private string renameOriginalName = null;
+        private bool suppressSaveOnClose = false;
+
         private bool isContainerClapsed = false;//图标容器是否折叠
         private double windowHeight = 0;
+        private bool isIconHeightSyncPending = false;//是否已排队图标高度校准
 
         // 窗口卷起状态
         private bool isRolledUp = false;
@@ -102,6 +108,9 @@ namespace Layouter.Views
 
             // 加载分区数据
             LoadPartitionData();
+
+            // 同步图标显示方式按钮
+            UpdateIconViewModeButton();
 
             // 设置分区样式
             ApplyStyleSettings();
@@ -184,12 +193,32 @@ namespace Layouter.Views
 
         private void Window_Closing(object sender, CancelEventArgs e)
         {
-            // 保存分区数据
-            SavePartitionData();
+            // 还原备份后需要关闭窗口而不写回旧数据
+            if (!suppressSaveOnClose)
+            {
+                // 保存分区数据
+                SavePartitionData();
+            }
 
             // 只隐藏窗口,不关闭应用程序
             e.Cancel = true;
             this.Hide();
+        }
+
+        /// <summary>
+        /// 关闭窗口但不把当前（可能已经过时的）分区数据写回磁盘
+        /// </summary>
+        public void CloseWithoutSaving()
+        {
+            suppressSaveOnClose = true;
+            try
+            {
+                Close();
+            }
+            finally
+            {
+                suppressSaveOnClose = false;
+            }
         }
 
         private void DesktopManagerWindow_SourceInitialized(object sender, EventArgs e)
@@ -233,13 +262,15 @@ namespace Layouter.Views
         {
             try
             {
-                // 如果窗口处于卷起状态,保存当前窗口高度
-                if (isRolledUp && windowHeight > this.Height)
-                {
-                    this.Height = windowHeight;
-                }
+                // 窗口处于卷起状态时，实际高度只有标题栏高度。
+                // 这里直接把「展开时的高度」写进配置文件，
+                // 既不会让卷起的窗口突然弹开，下次启动也能恢复成原来的高度。
+                double? heightOverride = isRolledUp && windowHeight > GetTitleBarHeight()
+                    ? windowHeight
+                    : (double?)null;
+
                 // 使用现有的服务保存分区数据
-                PartitionDataService.Instance.SavePartitionData(this);
+                PartitionDataService.Instance.SavePartitionData(this, heightOverride);
 
                 //保存分区样式
                 PartitionSettingsService.Instance.SaveWindowSettings(vm);
@@ -256,6 +287,15 @@ namespace Layouter.Views
             {
                 // 使用现有的服务加载分区数据
                 PartitionDataService.Instance.LoadPartitionData(this, this.WindowId);
+
+                // 加载后同步图标显示方式按钮
+                UpdateIconViewModeButton();
+
+                // 依据加载到的图标位置计算内容高度，保证图标过多时可以滚动查看
+                vm?.UpdateContentHeight();
+
+                // 布局完成后按真实渲染高度校准（名称换行时图标更高）
+                QueueIconItemHeightSync();
             }
             catch (Exception ex)
             {
@@ -302,14 +342,18 @@ namespace Layouter.Views
             UpdatePartitionSizeFromLayout();
 
             // 调整窗口尺寸
-            // 如果不是卷起状态,更新保存的窗口高度
-            if (this.Height > TitleBarHeight)
+            // 卷起状态下窗口高度只剩标题栏高度，此时不能覆盖展开时的高度，
+            // 否则展开后会停留在卷起后的小高度上。
+            if (!isRolledUp && this.Height > GetTitleBarHeight())
             {
                 windowHeight = this.Height;
             }
 
             vm.ArrangeIcons();
             UpdateWindowOpacity();
+
+            // 图标名称换行后实际高度会变化，稍后按真实渲染高度校准
+            QueueIconItemHeightSync();
         }
 
         private void Window_StateChanged(object sender, EventArgs e)
@@ -346,6 +390,10 @@ namespace Layouter.Views
                 return;
             }
 
+            // 先按真实渲染高度校准：图标名称换行后实际高度更大，
+            // 不校准的话这里会算出一个偏小的高度，窗口里就会出现滚动条。
+            SyncIconItemHeight();
+
             var cellSize = vm.GetIconCellSize();
             if (cellSize.Width <= 0 || cellSize.Height <= 0)
             {
@@ -358,13 +406,23 @@ namespace Layouter.Views
             var availableWidth = Math.Max(cellSize.Width + spacing * 2, Width - iconMargin.Left - iconMargin.Right);
             var availableHeight = Math.Max(cellSize.Height + spacing * 2, Height - titleHeight - iconMargin.Top - iconMargin.Bottom);
 
+            // 列表视图按行排列，行距与图标网格无关
+            double rowPitch = vm.IsListView ? DesktopManagerViewModel.ListRowHeight : cellSize.Height + spacing;
+
             var columns = Math.Max(1, (int)Math.Round((availableWidth - spacing) / (cellSize.Width + spacing)));
-            var rows = Math.Max(1, (int)Math.Round((availableHeight - spacing) / (cellSize.Height + spacing)));
+            var rows = Math.Max(1, (int)Math.Round((availableHeight - spacing) / rowPitch));
 
             var newAvailableWidth = columns * cellSize.Width + (columns + 1) * spacing;
-            var newAvailableHeight = rows * cellSize.Height + (rows + 1) * spacing;
-            var newWidth = Math.Ceiling(newAvailableWidth + iconMargin.Left + iconMargin.Right);
+            var newAvailableHeight = vm.IsListView
+                ? rows * DesktopManagerViewModel.ListRowHeight
+                : rows * cellSize.Height + (rows + 1) * spacing;
+
+            // 列表视图的宽度与图标网格无关，保持用户设定的宽度
+            var newWidth = vm.IsListView ? Width : Math.Ceiling(newAvailableWidth + iconMargin.Left + iconMargin.Right);
             var newHeight = Math.Ceiling(titleHeight + newAvailableHeight + iconMargin.Top + iconMargin.Bottom);
+
+            // 以实际内容高度兜底：换行导致内容更高时直接加高窗口，避免出现滚动条
+            newHeight = Math.Max(newHeight, GetRequiredContentHeight(titleHeight, iconMargin));
 
             if (Math.Abs(Width - newWidth) > 0.5 || Math.Abs(Height - newHeight) > 0.5)
             {
@@ -375,6 +433,14 @@ namespace Layouter.Views
                     Height = newHeight;
                     UpdatePartitionSizeFromLayout();
                     vm.ArrangeIcons();
+
+                    // 宽度变化可能改变行数，这里再兜底一次，保证不会出现滚动条
+                    double requiredHeight = GetRequiredContentHeight(titleHeight, iconMargin);
+                    if (Height < requiredHeight)
+                    {
+                        Height = Math.Ceiling(requiredHeight);
+                    }
+
                     lastSizeSnapTime = DateTime.UtcNow;
                 }
                 finally
@@ -382,6 +448,146 @@ namespace Layouter.Views
                     isAdjustingSize = false;
                 }
             }
+        }
+
+        /// <summary>
+        /// 计算「不出现滚动条」所需的窗口高度
+        /// </summary>
+        private double GetRequiredContentHeight(double titleHeight, Thickness iconMargin)
+        {
+            if (vm == null)
+            {
+                return 0;
+            }
+
+            return Math.Ceiling(titleHeight + vm.IconsContentHeight + iconMargin.Top + iconMargin.Bottom);
+        }
+
+        /// <summary>
+        /// 查找网格视图中承载图标的 Canvas
+        /// </summary>
+        private Canvas FindIconCanvas()
+        {
+            if (iconsContainer == null)
+            {
+                return null;
+            }
+
+            return FindCanvasInVisualTree(iconsContainer);
+        }
+
+        private static Canvas FindCanvasInVisualTree(DependencyObject root)
+        {
+            if (root == null)
+            {
+                return null;
+            }
+
+            int count = VisualTreeHelper.GetChildrenCount(root);
+            for (int i = 0; i < count; i++)
+            {
+                DependencyObject child = VisualTreeHelper.GetChild(root, i);
+
+                if (child is Canvas canvas)
+                {
+                    return canvas;
+                }
+
+                Canvas found = FindCanvasInVisualTree(child);
+                if (found != null)
+                {
+                    return found;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// 测量网格视图中真实渲染出来的图标项高度
+        /// </summary>
+        private double MeasureIconItemHeight()
+        {
+            if (vm == null || vm.IsListView)
+            {
+                return 0;
+            }
+
+            Canvas canvas = FindIconCanvas();
+            if (canvas == null)
+            {
+                return 0;
+            }
+
+            double max = 0;
+
+            foreach (UIElement child in canvas.Children)
+            {
+                if (child is FrameworkElement element && element.ActualHeight > 0)
+                {
+                    max = Math.Max(max, element.ActualHeight);
+                }
+            }
+
+            return max;
+        }
+
+        /// <summary>
+        /// 按真实渲染高度校准图标项高度
+        /// </summary>
+        /// <remarks>
+        /// 图标名称过长时会换行，真实高度比按图标尺寸估算的高度更大。
+        /// 校准后排布与内容高度才与实际显示一致，自动高度也不会算小。
+        /// </remarks>
+        private void SyncIconItemHeight()
+        {
+            if (vm == null || vm.IsListView)
+            {
+                return;
+            }
+
+            double measured = MeasureIconItemHeight();
+            if (measured <= 0)
+            {
+                return;
+            }
+
+            if (Math.Abs(vm.MeasuredItemHeight - measured) < 0.5)
+            {
+                return;
+            }
+
+            vm.MeasuredItemHeight = measured;
+            vm.ArrangeIcons();
+        }
+
+        /// <summary>
+        /// 延迟校准图标项高度（等待布局完成后再测量）
+        /// </summary>
+        private void QueueIconItemHeightSync()
+        {
+            if (isIconHeightSyncPending)
+            {
+                return;
+            }
+
+            isIconHeightSyncPending = true;
+
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                try
+                {
+                    SyncIconItemHeight();
+                }
+                catch (Exception ex)
+                {
+                    Log.Information($"校准图标高度失败: {ex.Message}");
+                }
+                finally
+                {
+                    isIconHeightSyncPending = false;
+                }
+            }), DispatcherPriority.ContextIdle);
         }
 
         private void QueueWindowSizeSnap()
@@ -413,16 +619,90 @@ namespace Layouter.Views
             }
 
             var iconMargin = iconsContainer?.Margin ?? new Thickness(0);
-            var width = IconsContainer?.ActualWidth > 0 ? IconsContainer.ActualWidth : Width;
-            var height = IconsContainer?.ActualHeight > 0 ? IconsContainer.ActualHeight : Math.Max(0, Height - GetTitleBarHeight());
 
-            vm.PartitionWidth = Math.Max(1, width - iconMargin.Left - iconMargin.Right);
+            // 使用当前可见的图标容器宽度：出现滚动条时可视区域会变窄，
+            // 图标需要按新的列数重新排布，否则最右侧一列会被滚动条遮住。
+            var container = vm.IsListView ? iconsListContainer : iconsContainer;
+
+            double width;
+
+            if (!vm.IsListView && IconsScrollViewer != null && IconsScrollViewer.ActualWidth > 0)
+            {
+                // 网格视图固定预留垂直滚动条的宽度：滚动条是否显示取决于图标数量，
+                // 若按「当前可视宽度」排布，滚动条出现/隐藏会引起列数来回变化。
+                width = IconsScrollViewer.ActualWidth
+                    - iconMargin.Left
+                    - iconMargin.Right
+                    - SystemParameters.VerticalScrollBarWidth;
+            }
+            else
+            {
+                width = container != null && container.ActualWidth > 0
+                    ? container.ActualWidth
+                    : (IconsContainer?.ActualWidth > 0 ? IconsContainer.ActualWidth : Width);
+            }
+
+            double height = IconsContainer?.ActualHeight > 0 ? IconsContainer.ActualHeight : Math.Max(0, Height - GetTitleBarHeight());
+
+            // 容器自身已经扣除了内边距，这里不再重复扣减
+            vm.PartitionWidth = Math.Max(1, width);
             vm.PartitionHeight = Math.Max(1, height - iconMargin.Top - iconMargin.Bottom);
         }
 
         private double GetTitleBarHeight()
         {
             return TitleBar?.ActualHeight > 0 ? TitleBar.ActualHeight : TitleBarHeight;
+        }
+
+        /// <summary>
+        /// 切换图标显示方式（网格 / 列表）
+        /// </summary>
+        private void ToggleIconViewMode_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (vm == null)
+                {
+                    return;
+                }
+
+                vm.IconViewMode = vm.IsGridView ? IconViewMode.List : IconViewMode.Grid;
+
+                UpdateIconViewModeButton();
+                SavePartitionData();
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"切换图标显示方式时出错: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 同步标题栏上的显示方式按钮
+        /// </summary>
+        private void UpdateIconViewModeButton()
+        {
+            try
+            {
+                if (IconViewModeIcon == null)
+                {
+                    return;
+                }
+
+                bool listMode = vm != null && vm.IsListView;
+                IconViewModeIcon.Symbol = listMode
+                    ? FluentIcons.Common.Symbol.List
+                    : FluentIcons.Common.Symbol.Grid;
+
+                if (IconViewModeButton != null)
+                {
+                    IconViewModeButton.ToolTip = listMode ? "切换为网格视图" : "切换为列表视图";
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"同步图标显示方式按钮时出错: {ex.Message}");
+            }
         }
 
         #endregion
@@ -928,15 +1208,28 @@ namespace Layouter.Views
         }
 
         /// <summary>
-        /// 把屏幕坐标转换为图标容器内的坐标
+        /// 把屏幕坐标转换为图标内容坐标系中的坐标
         /// </summary>
+        /// <remarks>
+        /// 图标区域外面套了滚动条，滚动后容器原点与内容原点不再重合，
+        /// 这里统一把滚动偏移量补上，图标落点与排序才能对得上。
+        /// </remarks>
         private Point GetIconContainerPoint(Point screenPoint)
         {
             try
             {
                 if (iconsContainer != null && iconsContainer.IsVisible)
                 {
-                    return iconsContainer.PointFromScreen(screenPoint);
+                    Point point = iconsContainer.PointFromScreen(screenPoint);
+                    point.Y += GetIconScrollOffset();
+                    return point;
+                }
+
+                if (iconsListContainer != null && iconsListContainer.IsVisible)
+                {
+                    Point point = iconsListContainer.PointFromScreen(screenPoint);
+                    point.Y += GetIconScrollOffset();
+                    return point;
                 }
             }
             catch (Exception ex)
@@ -945,6 +1238,26 @@ namespace Layouter.Views
             }
 
             return PointFromScreen(screenPoint);
+        }
+
+        /// <summary>
+        /// 获取图标区域的垂直滚动偏移量
+        /// </summary>
+        private double GetIconScrollOffset()
+        {
+            try
+            {
+                if (vm != null && vm.IsListView)
+                {
+                    return IconsListScrollViewer?.VerticalOffset ?? 0;
+                }
+
+                return IconsScrollViewer?.VerticalOffset ?? 0;
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         /// <summary>
@@ -963,6 +1276,13 @@ namespace Layouter.Views
                 int currentIndex = viewModel.Icons.IndexOf(icon);
                 if (currentIndex < 0)
                 {
+                    return;
+                }
+
+                // 列表视图按行排列，直接按落点所在行计算目标位置
+                if (viewModel.IsListView)
+                {
+                    ReorderIconInList(viewModel, icon, dropPoint, currentIndex);
                     return;
                 }
 
@@ -1001,6 +1321,28 @@ namespace Layouter.Views
             {
                 Log.Information($"卡片内排序失败: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// 列表视图下的排序：按落点所在的行计算目标位置
+        /// </summary>
+        private void ReorderIconInList(DesktopManagerViewModel viewModel, DesktopIcon icon, Point dropPoint, int currentIndex)
+        {
+            // 列表单行高度（与列表模板中的 MinHeight 保持一致）
+            const double rowHeight = 30;
+
+            // 列表容器内边距为 5
+            int targetIndex = (int)Math.Floor((dropPoint.Y - 5) / rowHeight);
+            targetIndex = Math.Max(0, Math.Min(targetIndex, viewModel.Icons.Count - 1));
+
+            if (targetIndex != currentIndex)
+            {
+                viewModel.Icons.Move(currentIndex, targetIndex);
+                Log.Information($"图标已在列表内重新排序：{currentIndex} → {targetIndex}");
+            }
+
+            viewModel.ArrangeIcons();
+            SavePartitionData();
         }
 
         /// <summary>
@@ -1223,12 +1565,44 @@ namespace Layouter.Views
         {
             try
             {
-                // 获取拖放的数据对象
-                var data = e.Data;
-                DesktopIcon newIcon = null;
-
                 // 在拖放结束时获取鼠标坐标
                 Point dropPoint = e.GetPosition((ItemsControl)sender);
+
+                // 图标区域可能处于滚动状态，落点需要换算到图标内容坐标系
+                if (ReferenceEquals(sender, iconsContainer))
+                {
+                    dropPoint.Y += IconsScrollViewer?.VerticalOffset ?? 0;
+                }
+                else if (ReferenceEquals(sender, iconsListContainer))
+                {
+                    dropPoint.Y += IconsListScrollViewer?.VerticalOffset ?? 0;
+                }
+
+                if (HandleIconDrop(e.Data, dropPoint))
+                {
+                    e.Handled = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"处理拖放时出错: {ex.Message}\n{ex.StackTrace}");
+            }
+        }
+
+        /// <summary>
+        /// 处理图标拖放
+        /// </summary>
+        /// <remarks>
+        /// 与 <see cref="IconsContainer_Drop"/> 的事件管道解耦，便于自动化验证真实的拖放逻辑。
+        /// </remarks>
+        /// <param name="data">拖放携带的数据</param>
+        /// <param name="dropPoint">落点坐标（相对图标容器）</param>
+        /// <returns>是否已处理该次拖放</returns>
+        private bool HandleIconDrop(IDataObject data, Point dropPoint)
+        {
+            try
+            {
+                DesktopIcon newIcon = null;
 
                 // 放置点坐标 - 以Panel为相对坐标系
                 double x = dropPoint.X;
@@ -1244,8 +1618,7 @@ namespace Layouter.Views
                 {
                     // 来自其它分区的图标统一由「拖出方」处理：
                     // 目标窗口只负责标记事件已处理，避免出现重复添加或图标丢失。
-                    e.Handled = true;
-                    return;
+                    return true;
                 }
 
                 // 检查是否是从其他来源拖过来的文件
@@ -1335,11 +1708,11 @@ namespace Layouter.Views
                 }
                 else
                 {
-                    var formats = e.Data.GetFormats();
+                    var formats = data.GetFormats();
                     if (formats.Contains("Shell IDList Array") || formats.Contains("CF_HDROP") || formats.Contains("FileGroupDescriptor"))
                     {
                         // 使用COM互操作获取Shell项目
-                        var shellItems = ShellUtil.GetShellItemsFromDataObject(e.Data);
+                        var shellItems = ShellUtil.GetShellItemsFromDataObject(data);
 
                         if (shellItems != null && shellItems.Count > 0)
                         {
@@ -1378,10 +1751,9 @@ namespace Layouter.Views
                 {
                     // 注意：图标已经在前面的代码中添加到视图模型中,这里不需要再次添加
 
-                    // 保存分区数据
-                    SavePartitionData();
-
-                    // 如果是从桌面拖过来的文件,则隐藏桌面上的原图标
+                    // 重要顺序：必须先隐藏桌面原图标（此步会写入隐藏存储索引），
+                    // 再保存分区数据。否则索引里还没有原始路径映射，
+                    // 落盘的就是隐藏存储路径，备份 / 还原后图标会变成无法使用的空壳。
                     if (!flag && data.GetDataPresent(DataFormats.FileDrop))
                     {
                         var files = data.GetData(DataFormats.FileDrop) as string[];
@@ -1399,16 +1771,24 @@ namespace Layouter.Views
 
                                 //确保图标路径为桌面图标路径
                                 string desktopPath = DesktopIconService.Instance.RemoveHiddenPathInIconPath(filePath);
-                                // 隐藏桌面上的原图标
-                                bool hidden = DesktopIconService.Instance.HideDesktopIcon(desktopPath);
+                                // 隐藏桌面上的原图标，并取回真实存放路径
+                                bool hidden = DesktopIconService.Instance.HideDesktopIcon(desktopPath, out string storedPath);
 
                                 if (!hidden)
                                 {
                                     Log.Information($"警告：无法隐藏桌面上的图标,但仍会将其添加到分区：{desktopPath}");
+                                    continue;
                                 }
-                                else
+
+                                Log.Information($"成功隐藏桌面上的图标：{desktopPath}");
+
+                                // 把图标路径更新为真实的存放路径，避免保存下预测值
+                                string predictedPath = DesktopIconService.Instance.CombineHiddenPathWithIconPath(desktopPath);
+                                foreach (var added in viewModel.Icons.Where(i =>
+                                    string.Equals(i.IconPath, predictedPath, StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(i.IconPath, desktopPath, StringComparison.OrdinalIgnoreCase)))
                                 {
-                                    Log.Information($"成功隐藏桌面上的图标：{desktopPath}");
+                                    added.IconPath = storedPath;
                                 }
                             }
                         }
@@ -1421,18 +1801,27 @@ namespace Layouter.Views
                         DesktopIconService.Instance.HideDesktopIcon(filePath);
                     }
 
+                    // 隐藏处理完成后再保存分区数据，确保落盘的路径可以被正确还原
+                    SavePartitionData();
+
                     // 延迟执行排列,确保新图标已经加入集合
                     Application.Current.Dispatcher.BeginInvoke(new Action(() =>
                     {
                         viewModel?.ArrangeIcons();
+
+                        // 新加入的图标可能名称更长（换行后更高），重新校准高度
+                        QueueIconItemHeightSync();
                     }));
 
-                    e.Handled = true;
+                    return true;
                 }
+
+                return false;
             }
             catch (Exception ex)
             {
                 Log.Information($"处理拖放时出错: {ex.Message}\n{ex.StackTrace}");
+                return false;
             }
         }
 
@@ -1473,6 +1862,12 @@ namespace Layouter.Views
 
             if (element != null && element.Tag is DesktopIcon icon)
             {
+                // 重命名编辑框内的点击不参与拖拽与选中
+                if (IsInRenameEditor(e.OriginalSource))
+                {
+                    return;
+                }
+
                 // 处理双击事件 - 打开文件或程序
                 if (e.ClickCount == 2)
                 {
@@ -1487,6 +1882,26 @@ namespace Layouter.Views
             }
         }
 
+        /// <summary>
+        /// 判断事件源是否位于重命名编辑框内
+        /// </summary>
+        private static bool IsInRenameEditor(object source)
+        {
+            DependencyObject current = source as DependencyObject;
+
+            while (current != null)
+            {
+                if (current is TextBox)
+                {
+                    return true;
+                }
+
+                current = VisualTreeHelper.GetParent(current);
+            }
+
+            return false;
+        }
+
         private void Icon_MouseUp(object sender, MouseButtonEventArgs e)
         {
             if (isDragging)
@@ -1498,6 +1913,12 @@ namespace Layouter.Views
             var element = sender as FrameworkElement;
             if (element?.Tag is DesktopIcon icon)
             {
+                // 重命名编辑框内的点击交给编辑框自己处理
+                if (IsInRenameEditor(e.OriginalSource))
+                {
+                    return;
+                }
+
                 DateTime now = DateTime.Now;
 
                 // 判断是否是双击（同一个图标在短时间内点击两次）
@@ -1516,9 +1937,224 @@ namespace Layouter.Views
                     // 单击,更新状态
                     lastClickTime = now;
                     lastClickedIcon = icon;
+
+                    if (ReferenceEquals(selectedIcon, icon))
+                    {
+                        // 已经选中的图标再次单击 → 进入重命名
+                        BeginRenameIcon(icon);
+                    }
+                    else
+                    {
+                        // 首次单击 → 选中
+                        SelectIcon(icon);
+                    }
                 }
             }
         }
+
+        #region 图标选中与重命名
+
+        /// <summary>
+        /// 选中图标（同时取消其它图标的选中状态）
+        /// </summary>
+        private void SelectIcon(DesktopIcon icon)
+        {
+            if (selectedIcon != null && !ReferenceEquals(selectedIcon, icon))
+            {
+                selectedIcon.IsSelected = false;
+            }
+
+            selectedIcon = icon;
+
+            if (selectedIcon != null)
+            {
+                selectedIcon.IsSelected = true;
+            }
+        }
+
+        /// <summary>
+        /// 开始重命名图标
+        /// </summary>
+        private void BeginRenameIcon(DesktopIcon icon)
+        {
+            if (icon == null)
+            {
+                return;
+            }
+
+            SelectIcon(icon);
+            renameOriginalName = icon.Name;
+            icon.IsRenaming = true;
+
+            // 重命名编辑框是在模板里一次性创建的（初始为折叠状态），
+            // Loaded 事件不会在每次进入重命名时再次触发，
+            // 因此这里主动定位编辑框并全选当前名称，方便直接输入覆盖。
+            Dispatcher.BeginInvoke(new Action(() => SelectRenameText(icon)), DispatcherPriority.ContextIdle);
+        }
+
+        /// <summary>
+        /// 定位指定图标的重命名编辑框并全选其中的文本
+        /// </summary>
+        private void SelectRenameText(DesktopIcon icon)
+        {
+            try
+            {
+                TextBox textBox = FindRenameTextBox(this, icon);
+                if (textBox == null)
+                {
+                    return;
+                }
+
+                textBox.Focus();
+                textBox.SelectAll();
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"全选重命名文本失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 在可视树中查找指定图标对应的重命名编辑框（网格视图与列表视图各有一份）
+        /// </summary>
+        private static TextBox FindRenameTextBox(DependencyObject root, DesktopIcon icon)
+        {
+            if (root == null)
+            {
+                return null;
+            }
+
+            int count = VisualTreeHelper.GetChildrenCount(root);
+            for (int i = 0; i < count; i++)
+            {
+                DependencyObject child = VisualTreeHelper.GetChild(root, i);
+
+                if (child is TextBox textBox
+                    && textBox.Visibility == Visibility.Visible
+                    && textBox.DataContext is DesktopIcon target
+                    && ReferenceEquals(target, icon))
+                {
+                    return textBox;
+                }
+
+                TextBox found = FindRenameTextBox(child, icon);
+                if (found != null)
+                {
+                    return found;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// 提交重命名
+        /// </summary>
+        private void CommitRename(DesktopIcon icon)
+        {
+            if (icon == null || !icon.IsRenaming)
+            {
+                return;
+            }
+
+            string original = renameOriginalName;
+            icon.IsRenaming = false;
+            renameOriginalName = null;
+
+            string name = icon.Name?.Trim();
+            icon.Name = string.IsNullOrEmpty(name) ? (original ?? string.Empty) : name;
+
+            // 名称变化可能让图标变高（换行），稍后重新校准高度
+            QueueIconItemHeightSync();
+
+            // 重命名后立即保存，保证重启 / 备份后依然生效
+            SavePartitionData();
+        }
+
+        /// <summary>
+        /// 取消重命名
+        /// </summary>
+        private void CancelRename(DesktopIcon icon)
+        {
+            if (icon == null || !icon.IsRenaming)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(renameOriginalName))
+            {
+                icon.Name = renameOriginalName;
+            }
+
+            icon.IsRenaming = false;
+            renameOriginalName = null;
+        }
+
+        /// <summary>
+        /// F2 键：重命名当前选中的图标
+        /// </summary>
+        private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.F2)
+            {
+                e.Handled = true;
+
+                if (selectedIcon == null)
+                {
+                    // 没有选中图标时，取最后一个被点击过的图标
+                    selectedIcon = lastClickedIcon;
+                }
+
+                BeginRenameIcon(selectedIcon);
+            }
+            else if (e.Key == Key.Escape)
+            {
+                if (selectedIcon != null && selectedIcon.IsRenaming)
+                {
+                    e.Handled = true;
+                    CancelRename(selectedIcon);
+                }
+            }
+        }
+
+        private void IconRenameBox_Loaded(object sender, RoutedEventArgs e)
+        {
+            if (sender is TextBox textBox)
+            {
+                textBox.Focus();
+                textBox.SelectAll();
+            }
+        }
+
+        private void IconRenameBox_KeyDown(object sender, KeyEventArgs e)
+        {
+            var textBox = sender as TextBox;
+            var icon = textBox?.DataContext as DesktopIcon;
+
+            if (e.Key == Key.Enter)
+            {
+                e.Handled = true;
+                CommitRename(icon);
+            }
+            else if (e.Key == Key.Escape)
+            {
+                e.Handled = true;
+                CancelRename(icon);
+            }
+        }
+
+        private void IconRenameBox_LostFocus(object sender, RoutedEventArgs e)
+        {
+            var textBox = sender as TextBox;
+            var icon = textBox?.DataContext as DesktopIcon;
+
+            if (icon != null && icon.IsRenaming)
+            {
+                CommitRename(icon);
+            }
+        }
+
+        #endregion
 
         private void MenuItem_Open(object sender, RoutedEventArgs e)
         {
@@ -1657,15 +2293,21 @@ namespace Layouter.Views
 
         private void ToggleRollUp()
         {
-            isRolledUp = !isRolledUp;
-
             if (isRolledUp)
             {
-                RollUp();
+                isRolledUp = false;
+                Unroll();
             }
             else
             {
-                Unroll();
+                // 卷起前先记下展开时的高度，展开时按此恢复
+                if (this.Height > GetTitleBarHeight())
+                {
+                    windowHeight = this.Height;
+                }
+
+                isRolledUp = true;
+                RollUp();
             }
 
             // 保存设置
@@ -1710,7 +2352,7 @@ namespace Layouter.Views
             Dispatcher.BeginInvoke(new Action(() =>
             {
                 IconsContainer.Visibility = Visibility.Visible;
-                this.Height = windowHeight;
+                this.Height = GetExpandedHeight();
                 isContainerClapsed = false;
 
                 // 显示功能按钮
@@ -1732,6 +2374,23 @@ namespace Layouter.Views
         }
 
         /// <summary>
+        /// 获取窗口展开状态下应有的高度
+        /// </summary>
+        /// <remarks>
+        /// 卷起时窗口实际高度只剩标题栏高度，展开必须恢复成卷起前的高度。
+        /// </remarks>
+        private double GetExpandedHeight()
+        {
+            if (windowHeight > GetTitleBarHeight())
+            {
+                return windowHeight;
+            }
+
+            // 尚未记录过展开高度时，退回当前高度，避免窗口被压成 0
+            return Math.Max(this.Height, GetTitleBarHeight());
+        }
+
+        /// <summary>
         /// 临时展开窗口
         /// </summary>
         private void TemporarilyUnroll()
@@ -1739,7 +2398,7 @@ namespace Layouter.Views
             Dispatcher.BeginInvoke(new Action(() =>
             {
                 IconsContainer.Visibility = Visibility.Visible;
-                this.Height = windowHeight;
+                this.Height = GetExpandedHeight();
                 isContainerClapsed = false;
 
                 // 显示功能按钮
@@ -1757,7 +2416,7 @@ namespace Layouter.Views
                 }
 
                 // 恢复窗口原始高度
-                this.Height = windowHeight;
+                this.Height = GetExpandedHeight();
 
             }), System.Windows.Threading.DispatcherPriority.Loaded);
 

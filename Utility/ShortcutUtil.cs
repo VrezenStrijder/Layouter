@@ -124,12 +124,78 @@ namespace Layouter.Utility
                 Type t = Type.GetTypeFromProgID("WScript.Shell");
                 dynamic shell = Activator.CreateInstance(t);
                 var shortcut = shell.CreateShortcut(shortcutPath);
-                return shortcut.TargetPath;
+                string target = shortcut.TargetPath;
+
+                // 目标路径里可能带有环境变量（如 %SystemRoot%\...），需要展开后再使用
+                if (!string.IsNullOrEmpty(target))
+                {
+                    target = Environment.ExpandEnvironmentVariables(target);
+                }
+
+                return target;
             }
             catch (Exception ex)
             {
                 Log.Information($"解析快捷方式失败({shortcutPath}): {ex.Message}");
                 return string.Empty;
+            }
+        }
+
+        /// <summary>
+        /// 尝试用「快捷方式目标文件」的图标替换快捷方式图标。
+        /// </summary>
+        /// <remarks>
+        /// Windows 资源管理器为 <c>.lnk</c> 绘制的图标会叠加一个蓝色快捷方式箭头，
+        /// 只有取目标文件自身的图标才能彻底消除该箭头。
+        /// </remarks>
+        private static bool TryGetShortcutTargetIcon(string shortcutPath, int size, out BitmapSource source)
+        {
+            source = null;
+
+            try
+            {
+                string targetPath = ResolveShortcut(shortcutPath);
+                if (string.IsNullOrEmpty(targetPath))
+                {
+                    return false;
+                }
+
+                targetPath = targetPath.Trim().Trim('"');
+
+                bool isDir = Directory.Exists(targetPath);
+                if (!isDir && !File.Exists(targetPath))
+                {
+                    return false;
+                }
+
+                // 目标本身也是快捷方式时不再继续解析，避免循环引用
+                if (!isDir && IsShortcutPath(targetPath))
+                {
+                    return false;
+                }
+
+                if (TryGetImageListBitmap(targetPath, size, out BitmapSource viaImageList))
+                {
+                    source = viaImageList;
+                    return true;
+                }
+
+                BitmapSource viaFile = isDir
+                    ? GetIconFromFolder(targetPath, size)
+                    : GetIconFromFileCore(targetPath, size);
+
+                if (viaFile == null)
+                {
+                    return false;
+                }
+
+                source = viaFile;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"获取快捷方式目标图标失败({shortcutPath}): {ex.Message}");
+                return false;
             }
         }
 
@@ -213,21 +279,18 @@ namespace Layouter.Utility
         /// </summary>
         private static BitmapSource LoadIcon(string filePath, int size)
         {
-            // 1) 优先使用系统图像列表，可拿到原生高分辨率图标
+            // 1) 快捷方式：系统图像列表中的快捷方式图标自带「快捷方式箭头」叠加，
+            //    这里直接解析出目标并使用目标图标，从根本上消除箭头。
+            if (IsShortcutPath(filePath)
+                && TryGetShortcutTargetIcon(filePath, size, out BitmapSource viaShortcutTarget))
+            {
+                return viaShortcutTarget;
+            }
+
+            // 2) 优先使用系统图像列表，可拿到原生高分辨率图标
             if (TryGetImageListBitmap(filePath, size, out BitmapSource viaImageList))
             {
                 return viaImageList;
-            }
-
-            // 2) 快捷方式：解析目标后再取一次
-            if (IsShortcutPath(filePath))
-            {
-                string targetPath = ResolveShortcut(filePath);
-                if (!string.IsNullOrEmpty(targetPath)
-                    && TryGetImageListBitmap(targetPath, size, out BitmapSource viaTarget))
-                {
-                    return viaTarget;
-                }
             }
 
             // 3) 目录
@@ -478,7 +541,26 @@ namespace Layouter.Utility
         /// <summary>
         /// 获取文件图标
         /// </summary>
+        /// <remarks>
+        /// 快捷方式（<c>.lnk</c>）会优先返回目标文件的图标，避免出现左下角的「快捷方式箭头」。
+        /// </remarks>
         public static BitmapSource GetIconFromFile(string filePath, int size)
+        {
+            if (!string.IsNullOrEmpty(filePath) && IsShortcutPath(filePath))
+            {
+                if (TryGetShortcutTargetIcon(filePath, size, out BitmapSource viaTarget))
+                {
+                    return viaTarget;
+                }
+            }
+
+            return GetIconFromFileCore(filePath, size);
+        }
+
+        /// <summary>
+        /// 获取文件图标（不解析快捷方式）
+        /// </summary>
+        private static BitmapSource GetIconFromFileCore(string filePath, int size)
         {
             try
             {

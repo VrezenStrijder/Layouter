@@ -1,6 +1,7 @@
 using System;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
+using Layouter.Services;
 
 namespace Layouter.Models
 {
@@ -14,6 +15,8 @@ namespace Layouter.Models
         private bool isDragging;
         private IconType iconType = IconType.Shortcut;
         private double textSize = 12d;
+        private bool isSelected;
+        private bool isRenaming;
 
         public string Id 
         { 
@@ -21,16 +24,76 @@ namespace Layouter.Models
             set => SetProperty(ref id, value); 
         }
 
-        public string Name 
-        { 
-            get => name; 
-            set => SetProperty(ref name, value); 
+        public string Name
+        {
+            get => name;
+            set
+            {
+                if (SetProperty(ref name, value))
+                {
+                    OnPropertyChanged(nameof(DisplayName));
+                }
+            }
         }
+
+        public string DisplayName
+        {
+            get
+            {
+                string value = name ?? string.Empty;
+
+                if (value.Length <= MaxDisplayNameLength)
+                {
+                    return value;
+                }
+
+                return value.Substring(0, MaxDisplayNameLength - 1) + "…";
+            }
+        }
+
+        /// <summary>
+        /// 名称在图标下方显示时的最大字符数，超出部分以省略号收尾
+        /// </summary>
+        public const int MaxDisplayNameLength = 14;
 
         public string IconPath 
         { 
             get => iconPath; 
-            set => SetProperty(ref iconPath, value); 
+            set
+            {
+                if (SetProperty(ref iconPath, value))
+                {
+                    OnPropertyChanged(nameof(DisplayPath));
+                }
+            }
+        }
+
+        /// <summary>
+        /// 展示用的文件路径
+        /// </summary>
+        /// <remarks>
+        /// 图标被收进「安全隐藏存储」后，<see cref="IconPath"/> 指向的是存放路径
+        /// （形如 HiddenStore\xxxxxxxx.lnk），对用户没有意义，
+        /// 这里换算回它原本所在的路径。
+        /// </remarks>
+        public string DisplayPath
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(iconPath))
+                {
+                    return string.Empty;
+                }
+
+                try
+                {
+                    return DesktopIconService.Instance.RemoveHiddenPathInIconPath(iconPath);
+                }
+                catch
+                {
+                    return iconPath;
+                }
+            }
         }
 
         public Point Position 
@@ -61,6 +124,24 @@ namespace Layouter.Models
         {
             get => textSize;
             set => SetProperty(ref textSize, value);
+        }
+
+        /// <summary>
+        /// 是否处于选中状态（用于高亮显示）
+        /// </summary>
+        public bool IsSelected
+        {
+            get => isSelected;
+            set => SetProperty(ref isSelected, value);
+        }
+
+        /// <summary>
+        /// 是否处于重命名编辑状态
+        /// </summary>
+        public bool IsRenaming
+        {
+            get => isRenaming;
+            set => SetProperty(ref isRenaming, value);
         }
 
         public DesktopIcon()

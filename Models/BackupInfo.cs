@@ -68,6 +68,15 @@ namespace Layouter.Models
         /// <summary>备份是否来自本机</summary>
         public bool IsFromThisMachine { get; set; }
 
+        /// <summary>
+        /// 是否为「还原前自动快照」。
+        /// <para>
+        /// 该类备份由还原操作自动生成，只用于兜底回滚，
+        /// 不应该再被当成普通备份反复还原（否则会生成越来越多的同名快照）。
+        /// </para>
+        /// </summary>
+        public bool IsSafetySnapshot { get; set; }
+
         /// <summary>创建时间（显示用）</summary>
         public string CreatedAtText => CreatedAt == default ? "-" : CreatedAt.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 
@@ -106,6 +115,9 @@ namespace Layouter.Models
 
         /// <summary>备注（显示用）</summary>
         public string RemarkText => string.IsNullOrWhiteSpace(Remark) ? "（无备注）" : Remark;
+
+        /// <summary>类型（显示用）</summary>
+        public string TypeText => IsSafetySnapshot ? "安全快照" : "手动备份";
     }
 
     /// <summary>
@@ -121,5 +133,11 @@ namespace Layouter.Models
 
         /// <summary>还原前自动创建的安全快照路径</summary>
         public string SnapshotPath { get; set; } = string.Empty;
+
+        /// <summary>还原后被恢复到桌面的图标数量（还原后的配置不再引用的隐藏图标）</summary>
+        public int RestoredToDesktopCount { get; set; }
+
+        /// <summary>还原后被清理的无效图标数量（目标文件已不存在的图标）</summary>
+        public int RemovedInvalidIconCount { get; set; }
     }
 }

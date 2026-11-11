@@ -5,11 +5,15 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 
-namespace Layouter.Plugins.Models
+namespace PluginEntry
 {
     public class PluginDescriptor
     {
+        public string ProtocolVersion { get; set; } = PluginProtocol.CurrentVersion;
+
         public string Id { get; set; }
+
+        public string Key { get; set; }
 
         public string Name { get; set; }
 
@@ -29,6 +33,10 @@ namespace Layouter.Plugins.Models
 
         public string IconFilePath { get; set; }
 
+        public bool DevelopmentMode { get; set; } = true;
+
+        public bool AllowUnsafeApis { get; set; } = false;
+
         public static PluginDescriptor FromJson(string json)
         {
             return JsonSerializer.Deserialize<PluginDescriptor>(json);
@@ -36,4 +44,12 @@ namespace Layouter.Plugins.Models
 
     }
 
+    public static class PluginProtocol
+    {
+        public const string CurrentVersion = "1.0";
+        public const string ManifestFileName = "plugin.json";
+        public const string IconFileName = "icon.json";
+        public const string StyleFileName = "style.json";
+        public const string PackageExtension = ".plug";
+    }
 }

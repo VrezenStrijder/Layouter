@@ -20,6 +20,7 @@ namespace Layouter.ViewModels
         private bool enableGlobalStyle;
         private bool allSelected;
         private bool anySelectedVisible;
+        private int totalIconCount;
 
         /// <summary>
         /// 分区列表
@@ -75,6 +76,26 @@ namespace Layouter.ViewModels
             get => anySelectedVisible;
             set => SetProperty(ref anySelectedVisible, value);
         }
+
+        /// <summary>
+        /// 所有分区的图标总数
+        /// </summary>
+        public int TotalIconCount
+        {
+            get => totalIconCount;
+            set
+            {
+                if (SetProperty(ref totalIconCount, value))
+                {
+                    OnPropertyChanged(nameof(TotalSummaryText));
+                }
+            }
+        }
+
+        /// <summary>
+        /// 分区与图标的汇总说明（显示用）
+        /// </summary>
+        public string TotalSummaryText => $"共 {Partitions.Count} 个分区 · {TotalIconCount} 个图标";
 
         public PartitionManagerViewModel()
         {
@@ -152,6 +173,9 @@ namespace Layouter.ViewModels
                         IsSelected = false
                     };
 
+                    // 统计分区内的图标类别与数量
+                    ApplyIconStatistics(partitionItem, partitionData);
+
                     // 订阅属性变更事件
                     partitionItem.PropertyChanged += (s, e) =>
                     {
@@ -172,12 +196,57 @@ namespace Layouter.ViewModels
 
                 // 初始化选择状态
                 UpdateSelectionState();
+                UpdateTotalIconCount();
             }
             catch (Exception ex)
             {
                 Log.Information($"加载分区数据失败: {ex.Message}");
                 AppMessageBox.Show($"加载分区数据失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        /// <summary>
+        /// 统计分区内的图标类别与数量
+        /// </summary>
+        private static void ApplyIconStatistics(PartitionItemViewModel item, PartitionDataDto partitionData)
+        {
+            int shortcut = 0, folder = 0, file = 0, shell = 0;
+
+            if (partitionData?.Icons != null)
+            {
+                foreach (var icon in partitionData.Icons)
+                {
+                    switch (PartitionDataService.ResolveIconType(icon))
+                    {
+                        case IconType.Shortcut:
+                            shortcut++;
+                            break;
+                        case IconType.Folder:
+                            folder++;
+                            break;
+                        case IconType.Shell:
+                            shell++;
+                            break;
+                        default:
+                            file++;
+                            break;
+                    }
+                }
+            }
+
+            item.ShortcutCount = shortcut;
+            item.FolderCount = folder;
+            item.FileCount = file;
+            item.ShellCount = shell;
+            item.IconCount = shortcut + folder + file + shell;
+        }
+
+        /// <summary>
+        /// 更新所有分区的图标总数
+        /// </summary>
+        private void UpdateTotalIconCount()
+        {
+            TotalIconCount = Partitions.Sum(p => p.IconCount);
         }
 
         /// <summary>
