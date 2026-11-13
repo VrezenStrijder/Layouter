@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -115,6 +116,22 @@ namespace Layouter.Services
         public string FallbackIndexPath => Path.Combine(StoreRoot, Env.HiddenStoreIndexFileName);
 
         /// <summary>
+        /// 搬运日志文件名
+        /// </summary>
+        private const string PendingJournalFileName = "pending.json";
+
+        /// <summary>
+        /// 搬运日志文件路径
+        /// </summary>
+        /// <remarks>
+        /// 批量搬运期间索引会在整批结束后统一写盘。如果程序在这期间被强制结束，
+        /// 已经搬进存储的文件就会失去索引记录，变成既不知道原始路径、也无法还原的孤立文件。
+        /// 这里在搬运开始前把这一批「原始路径」写进日志，
+        /// 启动时据此判断哪些搬运已经完成，并补齐缺失的索引记录。
+        /// </remarks>
+        public string PendingJournalPath => Path.Combine(StoreRoot, PendingJournalFileName);
+
+        /// <summary>
         /// 当前卷是否支持备用数据流
         /// </summary>
         public bool AdsAvailable
@@ -159,6 +176,7 @@ namespace Layouter.Services
                     LoadIndex();
                     MigrateLegacyStore();
                     TryRecoverOrphanEntries();
+                    RecoverPendingMoves();
                 }
                 catch (Exception ex)
                 {
@@ -310,6 +328,182 @@ namespace Layouter.Services
             {
                 Log.Information($"读取隐藏存储索引失败: {ex.Message}");
                 index = new HiddenStoreIndex();
+            }
+        }
+
+        /// <summary>
+        /// 把当前索引写盘
+        /// </summary>
+        /// <remarks>
+        /// 批量搬运时，每搬一个文件就落一次盘会造成明显延迟，
+        /// 因此批量流程用 <see cref="Hide(string, out string, bool)"/> 的 saveIndex:false
+        /// 跳过中途落盘，整批结束后调用本方法写一次。
+        /// </remarks>
+        public void FlushIndex()
+        {
+            lock (syncRoot)
+            {
+                EnsureInitialized();
+                SaveIndex();
+            }
+        }
+
+        /// <summary>
+        /// 按需统计目录大小
+        /// </summary>
+        /// <remarks>
+        /// 需要递归枚举目录里的每个文件，目录较大时耗时明显，
+        /// 因此搬运流程不会调用它，只在确实需要展示大小时才使用。
+        /// </remarks>
+        public long ComputeDirectorySize(string path)
+        {
+            return GetDirectorySize(path);
+        }
+
+        /// <summary>
+        /// 记录一批待搬运的原始路径
+        /// </summary>
+        /// <remarks>
+        /// 批量搬运时索引在整批结束后才统一写盘，这期间如果程序被强制结束，
+        /// 已经搬进存储的文件会失去索引记录。这里先把这批原始路径落到搬运日志，
+        /// 供启动时的 <see cref="RecoverPendingMoves"/> 补齐索引。
+        /// </remarks>
+        public void BeginPendingMoves(IReadOnlyList<string> originalPaths)
+        {
+            lock (syncRoot)
+            {
+                try
+                {
+                    EnsureStoreDirectory();
+
+                    var list = (originalPaths ?? Array.Empty<string>())
+                        .Where(p => !string.IsNullOrWhiteSpace(p))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+
+                    if (list.Count == 0)
+                    {
+                        return;
+                    }
+
+                    File.WriteAllText(
+                        PendingJournalPath,
+                        JsonSerializer.Serialize(list, new JsonSerializerOptions { WriteIndented = true }));
+
+                    Log.Information($"已写入搬运日志，共 {list.Count} 项");
+                }
+                catch (Exception ex)
+                {
+                    Log.Information($"写入搬运日志失败: {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// 整批搬运结束，清除搬运日志
+        /// </summary>
+        public void CompletePendingMoves()
+        {
+            lock (syncRoot)
+            {
+                TryDeleteFile(PendingJournalPath);
+            }
+        }
+
+        /// <summary>
+        /// 启动时自愈：依据搬运日志补齐「已搬走但索引未写盘」的记录
+        /// </summary>
+        /// <returns>补齐的记录数量</returns>
+        public int RecoverPendingMoves()
+        {
+            lock (syncRoot)
+            {
+                EnsureInitialized();
+
+                try
+                {
+                    if (!File.Exists(PendingJournalPath))
+                    {
+                        return 0;
+                    }
+
+                    var pending = new List<string>();
+                    try
+                    {
+                        pending = JsonSerializer.Deserialize<List<string>>(File.ReadAllText(PendingJournalPath))
+                                  ?? new List<string>();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Information($"读取搬运日志失败: {ex.Message}");
+                    }
+
+                    int recovered = 0;
+
+                    foreach (string originalPath in pending)
+                    {
+                        if (string.IsNullOrWhiteSpace(originalPath))
+                        {
+                            continue;
+                        }
+
+                        // 原始文件还在原处 → 搬运没有完成，保持现状不动
+                        if (File.Exists(originalPath) || Directory.Exists(originalPath))
+                        {
+                            continue;
+                        }
+
+                        // 存放名与「是否目录」有关，两种取值都试一遍
+                        string storedAsDirectory = GetStoredPath(originalPath, true);
+                        string storedAsFile = GetStoredPath(originalPath, false);
+
+                        bool isDirectory = Directory.Exists(storedAsDirectory);
+                        string storedPath = isDirectory ? storedAsDirectory : storedAsFile;
+
+                        if (!isDirectory && !File.Exists(storedAsFile))
+                        {
+                            // 搬运没有完成（或目标已丢失），不建立记录，避免指向空壳
+                            continue;
+                        }
+
+                        string id = ComputeId(originalPath);
+                        if (index.Entries.Any(e => string.Equals(e.Id, id, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            continue;
+                        }
+
+                        index.Entries.Add(new HiddenStoreEntry
+                        {
+                            Id = id,
+                            OriginalPath = originalPath,
+                            StoredName = Path.GetFileName(storedPath),
+                            DisplayName = isDirectory
+                                ? new DirectoryInfo(originalPath).Name
+                                : Path.GetFileName(originalPath),
+                            IsDirectory = isDirectory,
+                            CreatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                            Size = isDirectory ? 0 : GetFileSize(storedPath)
+                        });
+
+                        recovered++;
+                        Log.Information($"已根据搬运日志补齐隐藏记录: {originalPath}");
+                    }
+
+                    if (recovered > 0)
+                    {
+                        SaveIndex();
+                        Log.Information($"已根据搬运日志恢复 {recovered} 条隐藏记录");
+                    }
+
+                    TryDeleteFile(PendingJournalPath);
+
+                    return recovered;
+                }
+                catch (Exception ex)
+                {
+                    Log.Information($"根据搬运日志恢复隐藏记录失败: {ex.Message}");
+                    return 0;
+                }
             }
         }
 
@@ -640,8 +834,12 @@ namespace Layouter.Services
         /// </summary>
         /// <param name="originalPath">原始路径</param>
         /// <param name="storedPath">存放路径</param>
+        /// <param name="saveIndex">
+        /// 是否立即把索引写盘。批量搬运时传 false，整批完成后再写一次即可，
+        /// 避免每搬一个文件就落一次盘。
+        /// </param>
         /// <returns>是否成功</returns>
-        public bool Hide(string originalPath, out string storedPath)
+        public bool Hide(string originalPath, out string storedPath, bool saveIndex = true)
         {
             storedPath = string.Empty;
 
@@ -674,7 +872,13 @@ namespace Layouter.Services
                 if (TryGetEntryByOriginalPath(originalPath, out HiddenStoreEntry existing))
                 {
                     storedPath = Path.Combine(StoreRoot, existing.StoredName);
-                    if (File.Exists(storedPath) || Directory.Exists(storedPath))
+
+                    // 必须确认原始文件确实已经不在原处才算「已隐藏」。
+                    // 如果原始文件又回到了桌面（例如从备份恢复、或上次搬运中途失败留下了记录），
+                    // 这里必须真正再搬一次，否则文件会留在桌面上却被当成已隐藏。
+                    bool originalStillExists = File.Exists(originalPath) || Directory.Exists(originalPath);
+
+                    if (!originalStillExists && (File.Exists(storedPath) || Directory.Exists(storedPath)))
                     {
                         return true;
                     }
@@ -715,12 +919,18 @@ namespace Layouter.Services
                         : Path.GetFileName(originalPath),
                     IsDirectory = isDirectory,
                     CreatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-                    Size = isDirectory ? GetDirectorySize(target) : GetFileSize(target)
+                    // 目录大小需要递归枚举每个文件（两万文件的目录要十几秒），
+                    // 这里只记录文件自身的大小，目录大小留 0，需要时再按需统计。
+                    Size = isDirectory ? 0 : GetFileSize(target)
                 };
 
                 index.Entries.RemoveAll(e => string.Equals(e.Id, entry.Id, StringComparison.OrdinalIgnoreCase));
                 index.Entries.Add(entry);
-                SaveIndex();
+
+                if (saveIndex)
+                {
+                    SaveIndex();
+                }
 
                 storedPath = target;
                 Log.Information($"已隐藏: {originalPath} -> {storedName}");
@@ -817,35 +1027,42 @@ namespace Layouter.Services
         }
 
         /// <summary>
-        /// 移动文件，跨卷时退化为复制 + 删除
+        /// 移动文件，支持跨卷搬运
         /// </summary>
         private static void MoveFile(string source, string destination)
         {
-            try
+            // MOVEFILE_COPY_ALLOWED 让内核接管跨卷搬运，
+            // 比手工「复制 + 删除」快得多，也不会因为逐个文件复制而长时间占用线程。
+            if (System.Windows.Win32.MoveFileEx(source, destination,
+                System.Windows.Win32.MOVEFILE_COPY_ALLOWED | System.Windows.Win32.MOVEFILE_REPLACE_EXISTING))
             {
-                File.Move(source, destination);
+                return;
             }
-            catch (IOException)
-            {
-                File.Copy(source, destination, true);
-                File.Delete(source);
-            }
+
+            // 兜底：极少数情况下（如目标被占用）退回 .NET 的移动
+            int error = Marshal.GetLastWin32Error();
+            Log.Information($"MoveFileEx 移动文件失败({error})，改用 .NET 移动: {source}");
+
+            File.Move(source, destination, true);
         }
 
         /// <summary>
-        /// 移动目录，跨卷时退化为递归复制 + 删除
+        /// 移动目录，支持跨卷搬运
         /// </summary>
         private static void MoveDirectory(string source, string destination)
         {
-            try
+            if (System.Windows.Win32.MoveFileEx(source, destination,
+                System.Windows.Win32.MOVEFILE_COPY_ALLOWED | System.Windows.Win32.MOVEFILE_REPLACE_EXISTING))
             {
-                Directory.Move(source, destination);
+                return;
             }
-            catch (IOException)
-            {
-                CopyDirectory(source, destination);
-                Directory.Delete(source, true);
-            }
+
+            // 兜底：递归复制 + 删除
+            int error = Marshal.GetLastWin32Error();
+            Log.Information($"MoveFileEx 移动目录失败({error})，改用递归复制: {source}");
+
+            CopyDirectory(source, destination);
+            Directory.Delete(source, true);
         }
 
         private static void CopyDirectory(string source, string destination)
@@ -1022,7 +1239,8 @@ namespace Layouter.Services
                                 : Path.GetFileName(originalPath),
                             IsDirectory = isDirectory,
                             CreatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-                            Size = isDirectory ? GetDirectorySize(orphan) : GetFileSize(orphan)
+                            // 目录大小不做递归统计，避免程序启动时被大目录拖慢
+                            Size = isDirectory ? 0 : GetFileSize(orphan)
                         };
 
                         index.Entries.Add(entry);
@@ -1054,7 +1272,8 @@ namespace Layouter.Services
         {
             string name = Path.GetFileName(path);
             return string.Equals(name, Env.HiddenStoreIndexFileName, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(name, Env.HiddenStoreHostFileName, StringComparison.OrdinalIgnoreCase);
+                || string.Equals(name, Env.HiddenStoreHostFileName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(name, PendingJournalFileName, StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>

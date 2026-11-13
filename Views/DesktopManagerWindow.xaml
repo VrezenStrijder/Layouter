@@ -116,6 +116,7 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
 
                             <Grid Grid.Column="0">
@@ -157,8 +158,25 @@
                                          KeyDown="TitleEditBox_KeyDown"
                                          LostFocus="TitleEditBox_LostFocus"/>
                             </Grid>
+                            <!-- 搬运进度：把桌面项目搬进隐藏存储时显示 -->
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0"
+                                        Visibility="{Binding IsTransferring, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <TextBlock x:Name="TransferProgressTextBlock" Text="{Binding TransferProgressText}"
+                                           Foreground="{Binding TitleForeground}"
+                                           FontSize="11" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <!-- 单个大目录没有中间进度，用不确定进度条表示正在忙 -->
+                                <Grid Width="80" Height="6" VerticalAlignment="Center">
+                                    <ProgressBar x:Name="TransferProgressBar" Minimum="0" Maximum="100" Value="{Binding TransferProgress, Mode=OneWay}"
+                                                 Foreground="{Binding TitleForeground}" Background="#33FFFFFF" BorderThickness="0"
+                                                 Visibility="{Binding TransferProgressIndeterminate, Converter={StaticResource BooleanToVisibilityConverter}, ConverterParameter=Invert}"/>
+                                    <ProgressBar x:Name="TransferIndeterminateBar" IsIndeterminate="True"
+                                                 Foreground="{Binding TitleForeground}" Background="#33FFFFFF" BorderThickness="0"
+                                                 Visibility="{Binding TransferProgressIndeterminate, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                </Grid>
+                            </StackPanel>
+
                             <!-- 功能按钮区域 -->
-                            <StackPanel Orientation="Horizontal" Grid.Column="1" VerticalAlignment="Center" Margin="0,0,4,0">
+                            <StackPanel Orientation="Horizontal" Grid.Column="2" VerticalAlignment="Center" Margin="0,0,4,0">
                                 <!-- 新增分区按钮 -->
                                 <Button Style="{StaticResource TitleBarButtonStyle}" ToolTip="新建分区" Click="NewPartition_Click" x:Name="NewPartitionButton">
                                     <FluentIcons:SymbolIcon Symbol="Add" FontSize="16" Foreground="{Binding TitleForeground}" />
@@ -205,14 +223,19 @@
                 <Border x:Name="IconsContainer" Grid.Row="1" Background="{Binding ContentBackground}" CornerRadius="0,0,8,0">
                     <Grid>
                         <!-- 网格视图：图标排成方阵，数量过多时通过垂直滚动条查看 -->
+                        <!-- Height 绑定 IconsViewHeight：可见高度按整行收敛，
+                             避免最后一行只露出一半；多出来的空间留在分区底部（背景透明，看不出来） -->
                         <ScrollViewer x:Name="IconsScrollViewer"
                                       Background="{Binding BackgroundColor}"
                                       VerticalScrollBarVisibility="Auto"
                                       HorizontalScrollBarVisibility="Hidden"
+                                      VerticalAlignment="Top"
+                                      Height="{Binding IconsViewHeight}"
                                       Visibility="{Binding IsGridView, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <ItemsControl ItemsSource="{Binding Icons}" Margin="5,5,5,5"
                      AllowDrop="True" Background="Transparent"
                      HorizontalContentAlignment="Stretch"
+                     VerticalContentAlignment="Top"
                      x:Name="iconsContainer"
                      PreviewMouseLeftButtonDown="IconsContainer_PreviewMouseLeftButtonDown"
                      PreviewMouseMove="IconsContainer_PreviewMouseMove"
@@ -222,7 +245,10 @@
                                     <ItemsPanelTemplate>
                                         <!-- Canvas 不会自行累加子元素位置，必须显式给出内容高度，
                                              否则滚动容器计算不出可滚动范围，垂直滚动条不会出现 -->
+                                        <!-- VerticalAlignment 必须显式设为 Top：Canvas 有显式高度，
+                                             默认的 Stretch 会把它垂直居中，图标就不再从左上角开始排 -->
                                         <Canvas IsItemsHost="True"
+                                                VerticalAlignment="Top"
                                                 Height="{Binding IconsContentHeight}"/>
                                     </ItemsPanelTemplate>
                                 </ItemsControl.ItemsPanel>
@@ -339,10 +365,13 @@
                                       Background="{Binding BackgroundColor}"
                                       VerticalScrollBarVisibility="Auto"
                                       HorizontalScrollBarVisibility="Disabled"
+                                      VerticalAlignment="Top"
+                                      Height="{Binding IconsViewHeight}"
                                       Visibility="{Binding IsListView, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <ItemsControl ItemsSource="{Binding Icons}" Margin="5,5,5,5"
                              AllowDrop="True" Background="Transparent"
                              HorizontalContentAlignment="Stretch"
+                             VerticalContentAlignment="Top"
                              x:Name="iconsListContainer"
                              PreviewMouseLeftButtonDown="IconsContainer_PreviewMouseLeftButtonDown"
                              PreviewMouseMove="IconsContainer_PreviewMouseMove"

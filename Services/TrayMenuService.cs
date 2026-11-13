@@ -104,7 +104,7 @@ namespace Layouter.Services
         }
 
         /// <summary>
-        /// 创建设置子菜单（自启动、双击桌面隐藏图标、全局分区设置）
+        /// 创建设置子菜单（自启动、双击桌面隐藏元素、全局分区设置）
         /// </summary>
         private void CreateSettingsMenuItems(MenuItem settingsMenuItem)
         {
@@ -121,8 +121,8 @@ namespace Layouter.Services
             autoStartMenuItem.Items.Add(autoStartToggleItem);
             menuItems["AutoStartToggle"] = autoStartToggleItem;
 
-            // 双击桌面隐藏桌面图标菜单项
-            var desktopToggleMenuItem = CreateMenuItem("双击桌面隐藏图标", IconUtil.CreateMenuItemIcon(FluentIcons.Common.Symbol.Eye, Colors.DodgerBlue));
+            // 双击桌面隐藏元素菜单项
+            var desktopToggleMenuItem = CreateMenuItem("双击桌面隐藏元素", IconUtil.CreateMenuItemIcon(FluentIcons.Common.Symbol.Eye, Colors.DodgerBlue));
             settingsMenuItem.Items.Add(desktopToggleMenuItem);
             menuItems["DesktopDoubleClickToggle"] = desktopToggleMenuItem;
 
@@ -141,7 +141,7 @@ namespace Layouter.Services
         }
 
         /// <summary>
-        /// 切换「双击桌面隐藏图标」功能
+        /// 切换「双击桌面隐藏元素」功能
         /// </summary>
         private void ToggleDesktopDoubleClick(MenuItem menuItem)
         {

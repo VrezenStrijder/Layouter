@@ -6,15 +6,15 @@
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<UseWPF>true</UseWPF>
-		<AssemblyVersion>2.2.0.0</AssemblyVersion>
-		<FileVersion>2.2.0.0</FileVersion>
+		<AssemblyVersion>2.3.0.0</AssemblyVersion>
+		<FileVersion>2.3.0.0</FileVersion>
 		<ApplicationIcon>Resources\icon.ico</ApplicationIcon>
 
 		<Product>桌面助手(Layouter)</Product>
 		<Authors>@VrezenStrijder</Authors>
 		<Copyright>Copyright © 2026 @VrezenStrijder. All rights reserved.</Copyright>
 		<AssemblyTitle>Layouter</AssemblyTitle>
-		<Version>2.2.0</Version>
+		<Version>2.3.0</Version>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -44,7 +44,6 @@
 		<Compile Remove="MainWindow.xaml.cs" />
 		<Compile Remove="Models\Configuration.cs" />
 		<Compile Remove="Plugins\CalculatorPlugin.cs" />
-		<Compile Remove="Plugins\LoadedPlugin.cs" />
 		<Compile Remove="Plugins\PluginDemoWindow.xaml.cs" />
 		<Compile Remove="Plugins\PluginTemplates\DefaultPluginTemplate.cs" />
 		<Compile Remove="Plugins\PluginTemplates\DynamicPluginCodeFileTemplate.cs" />
@@ -65,7 +64,6 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<None Remove="Plugins\pluginFileStructure.txt" />
 		<None Remove="Plugins\PluginTemplates\pluginIcons.json" />
 		<None Remove="Plugins\PluginTemplates\PluginInfo.json" />
 	</ItemGroup>

@@ -345,8 +345,15 @@ namespace Layouter.Services
         /// </summary>
         /// <param name="filePath">桌面上的原始路径</param>
         /// <param name="storedPath">隐藏后在安全存储中的存放路径（系统图标返回原路径）</param>
+        /// <param name="refreshDesktop">
+        /// 是否立即刷新桌面。批量处理时传 false，整批完成后统一刷新一次，
+        /// 避免每个文件都触发一次同步的 Shell 刷新（那会阻塞界面）。
+        /// </param>
+        /// <param name="saveIndex">
+        /// 是否立即把隐藏索引写盘。批量处理时传 false，整批完成后统一写一次。
+        /// </param>
         /// <returns>是否隐藏成功</returns>
-        public bool HideDesktopIcon(string filePath, out string storedPath)
+        public bool HideDesktopIcon(string filePath, out string storedPath, bool refreshDesktop = true, bool saveIndex = true)
         {
             storedPath = filePath;
 
@@ -375,11 +382,16 @@ namespace Layouter.Services
 
                 // 移入安全隐藏存储：桌面命名空间中不再留下任何隐藏目录，
                 // 存放名称使用哈希摘要，路径映射索引写入宿主文件的索引文件。
-                if (SecureHiddenStore.Instance.Hide(filePath, out string hiddenPath))
+                if (SecureHiddenStore.Instance.Hide(filePath, out string hiddenPath, saveIndex))
                 {
                     storedPath = hiddenPath;
                     Log.Information($"成功隐藏桌面图标: {filePath} -> {Path.GetFileName(hiddenPath)}");
-                    RefreshDesktop();
+
+                    if (refreshDesktop)
+                    {
+                        RefreshDesktop();
+                    }
+
                     return true;
                 }
 
@@ -391,6 +403,85 @@ namespace Layouter.Services
                 Log.Information($"隐藏桌面图标时出错: {ex.Message}");
                 return false;
             }
+        }
+
+        /// <summary>
+        /// 批量隐藏桌面上的文件图标
+        /// </summary>
+        /// <remarks>
+        /// 整批处理过程中不做「刷新桌面」和「写索引」这类耗时动作，
+        /// 全部完成后再统一执行一次，避免每搬一个文件就阻塞一次界面。
+        /// </remarks>
+        /// <param name="filePaths">桌面上的原始路径列表</param>
+        /// <param name="progressCallback">
+        /// 进度回调，参数为「已完成项数 / 总项数」。在后台线程上调用，
+        /// 需要更新界面时应自行切回界面线程。
+        /// </param>
+        /// <returns>每个项目的处理结果</returns>
+        public List<HideIconResult> HideDesktopIcons(IReadOnlyList<string> filePaths, Action<int, int> progressCallback = null)
+        {
+            var results = new List<HideIconResult>();
+
+            if (filePaths == null || filePaths.Count == 0)
+            {
+                return results;
+            }
+
+            bool changed = false;
+
+            // 搬运开始前先落一份搬运日志：整批搬运期间索引不会写盘，
+            // 万一程序中途被强制结束，下次启动可以依据日志补齐索引，避免文件变成孤立条目。
+            SecureHiddenStore.Instance.BeginPendingMoves(filePaths);
+
+            int completed = 0;
+
+            foreach (string filePath in filePaths)
+            {
+                var result = new HideIconResult { OriginalPath = filePath };
+
+                try
+                {
+                    bool hidden = HideDesktopIcon(filePath, out string storedPath, refreshDesktop: false, saveIndex: false);
+                    result.Success = hidden;
+                    result.StoredPath = storedPath;
+
+                    if (hidden)
+                    {
+                        changed = true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    result.Success = false;
+                    result.ErrorMessage = ex.Message;
+                    Log.Information($"批量隐藏桌面图标时出错({filePath}): {ex.Message}");
+                }
+
+                results.Add(result);
+
+                completed++;
+
+                try
+                {
+                    progressCallback?.Invoke(completed, filePaths.Count);
+                }
+                catch (Exception ex)
+                {
+                    Log.Information($"上报搬运进度失败: {ex.Message}");
+                }
+            }
+
+            if (changed)
+            {
+                // 整批完成后统一落盘 + 刷新桌面
+                SecureHiddenStore.Instance.FlushIndex();
+                RefreshDesktop();
+            }
+
+            // 索引已写盘，搬运日志可以清除
+            SecureHiddenStore.Instance.CompletePendingMoves();
+
+            return results;
         }
 
         /// <summary>

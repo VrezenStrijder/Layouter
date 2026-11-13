@@ -20,6 +20,14 @@ namespace Layouter.Services
         private const double SnapThreshold = 10; // 吸附阈值,当窗口边缘距离其他窗口边缘小于此值时触发吸附
         private bool isArrangingWindows = false; // 标记是否正在执行ArrangeWindows操作
 
+        // 正在排队执行尺寸吸附的分区，防止吸附任务堆积把界面卡住
+        private readonly HashSet<string> pendingSizeSnaps = new HashSet<string>();
+
+        // 连续尺寸吸附次数，用于识别互相拉扯导致的死循环
+        private readonly Dictionary<string, int> sizeSnapCounts = new Dictionary<string, int>();
+
+        private const int MaxConsecutiveSizeSnaps = 3;
+
         private WindowManagerService()
         {
         }
@@ -57,6 +65,9 @@ namespace Layouter.Services
                 window.LocationChanged -= Window_LocationChanged;
                 window.SizeChanged -= Window_SizeChanged;
                 managedWindows.Remove(window);
+
+                pendingSizeSnaps.Remove(window.WindowId);
+                sizeSnapCounts.Remove(window.WindowId);
             }
         }
 
@@ -199,6 +210,9 @@ namespace Layouter.Services
         {
             if (sender is DesktopManagerWindow window && !isArrangingWindows)
             {
+                // 分区被用户主动移动，重新开始计算连续尺寸吸附次数
+                sizeSnapCounts.Remove(window.WindowId);
+
                 // 检查是否需要吸附到其他窗口
                 SnapWindowPosition(window);
             }
@@ -264,6 +278,9 @@ namespace Layouter.Services
         /// <summary>
         /// 窗口位置吸附功能
         /// </summary>
+        /// <remarks>
+        /// 位置吸附只改变分区坐标，不会改动长宽。
+        /// </remarks>
         private void SnapWindowPosition(DesktopManagerWindow window)
         {
             var otherWindows = managedWindows
@@ -279,104 +296,155 @@ namespace Layouter.Services
 
             double newLeft = window.Left;
             double newTop = window.Top;
-            bool snapped = false;
+            bool leftSnapped = false;
+            bool topSnapped = false;
 
             // 是否应该吸附到工作区边缘
             if (Math.Abs(window.Left - WindowMargin) < SnapThreshold)
             {
                 newLeft = WindowMargin;
-                snapped = true;
+                leftSnapped = true;
             }
             else if (Math.Abs(window.Left + window.Width - (workArea.Width - WindowMargin)) < SnapThreshold)
             {
                 newLeft = workArea.Width - window.Width - WindowMargin;
-                snapped = true;
+                leftSnapped = true;
             }
 
             if (Math.Abs(window.Top - WindowMargin) < SnapThreshold)
             {
                 newTop = WindowMargin;
-                snapped = true;
+                topSnapped = true;
             }
             else if (Math.Abs(window.Top + window.Height - (workArea.Height - WindowMargin)) < SnapThreshold)
             {
                 newTop = workArea.Height - window.Height - WindowMargin;
-                snapped = true;
+                topSnapped = true;
             }
 
             //是否应该吸附到其他窗口
             foreach (var otherWindow in otherWindows)
             {
-                // 左边缘对齐
-                if (Math.Abs(window.Left - otherWindow.Left) < SnapThreshold)
+                // 水平、垂直方向各自只认第一个命中的目标，
+                // 多个候选互相覆盖会让分区在几个位置之间来回跳
+                if (!leftSnapped)
                 {
-                    newLeft = otherWindow.Left;
-                    snapped = true;
-                }
-                // 右边缘对齐
-                else if (Math.Abs(window.Left + window.Width - (otherWindow.Left + otherWindow.Width)) < SnapThreshold)
-                {
-                    newLeft = otherWindow.Left + otherWindow.Width - window.Width;
-                    snapped = true;
-                }
-                // 右边缘对左边缘
-                else if (Math.Abs(window.Left + window.Width - (otherWindow.Left - WindowMargin)) < SnapThreshold)
-                {
-                    newLeft = otherWindow.Left - window.Width - WindowMargin;
-                    snapped = true;
-                }
-                // 左边缘对右边缘
-                else if (Math.Abs(window.Left - (otherWindow.Left + otherWindow.Width + WindowMargin)) < SnapThreshold)
-                {
-                    newLeft = otherWindow.Left + otherWindow.Width + WindowMargin;
-                    snapped = true;
+                    // 左边缘对齐
+                    if (Math.Abs(window.Left - otherWindow.Left) < SnapThreshold)
+                    {
+                        newLeft = otherWindow.Left;
+                        leftSnapped = true;
+                    }
+                    // 右边缘对齐
+                    else if (Math.Abs(window.Left + window.Width - (otherWindow.Left + otherWindow.Width)) < SnapThreshold)
+                    {
+                        newLeft = otherWindow.Left + otherWindow.Width - window.Width;
+                        leftSnapped = true;
+                    }
+                    // 右边缘对左边缘
+                    else if (Math.Abs(window.Left + window.Width - (otherWindow.Left - WindowMargin)) < SnapThreshold)
+                    {
+                        newLeft = otherWindow.Left - window.Width - WindowMargin;
+                        leftSnapped = true;
+                    }
+                    // 左边缘对右边缘
+                    else if (Math.Abs(window.Left - (otherWindow.Left + otherWindow.Width + WindowMargin)) < SnapThreshold)
+                    {
+                        newLeft = otherWindow.Left + otherWindow.Width + WindowMargin;
+                        leftSnapped = true;
+                    }
                 }
 
-                // 上边缘对齐
-                if (Math.Abs(window.Top - otherWindow.Top) < SnapThreshold)
+                if (!topSnapped)
                 {
-                    newTop = otherWindow.Top;
-                    snapped = true;
-                }
-                // 下边缘对齐
-                else if (Math.Abs(window.Top + window.Height - (otherWindow.Top + otherWindow.Height)) < SnapThreshold)
-                {
-                    newTop = otherWindow.Top + otherWindow.Height - window.Height;
-                    snapped = true;
-                }
-                // 下边缘对上边缘
-                else if (Math.Abs(window.Top + window.Height - (otherWindow.Top - WindowMargin)) < SnapThreshold)
-                {
-                    newTop = otherWindow.Top - window.Height - WindowMargin;
-                    snapped = true;
-                }
-                // 上边缘对下边缘
-                else if (Math.Abs(window.Top - (otherWindow.Top + otherWindow.Height + WindowMargin)) < SnapThreshold)
-                {
-                    newTop = otherWindow.Top + otherWindow.Height + WindowMargin;
-                    snapped = true;
+                    // 上边缘对齐
+                    if (Math.Abs(window.Top - otherWindow.Top) < SnapThreshold)
+                    {
+                        newTop = otherWindow.Top;
+                        topSnapped = true;
+                    }
+                    // 下边缘对齐
+                    else if (Math.Abs(window.Top + window.Height - (otherWindow.Top + otherWindow.Height)) < SnapThreshold)
+                    {
+                        newTop = otherWindow.Top + otherWindow.Height - window.Height;
+                        topSnapped = true;
+                    }
+                    // 下边缘对上边缘
+                    else if (Math.Abs(window.Top + window.Height - (otherWindow.Top - WindowMargin)) < SnapThreshold)
+                    {
+                        newTop = otherWindow.Top - window.Height - WindowMargin;
+                        topSnapped = true;
+                    }
+                    // 上边缘对下边缘
+                    else if (Math.Abs(window.Top - (otherWindow.Top + otherWindow.Height + WindowMargin)) < SnapThreshold)
+                    {
+                        newTop = otherWindow.Top + otherWindow.Height + WindowMargin;
+                        topSnapped = true;
+                    }
                 }
             }
 
-            // 更新窗口位置
-            if (snapped)
+            if (!leftSnapped && !topSnapped)
             {
-                window.Dispatcher.BeginInvoke(new Action(() =>
-                {
-                    window.Left = newLeft;
-                    window.Top = newTop;
-
-                    // 保存分区数据
-                    PartitionDataService.Instance.SavePartitionData(window);
-                }));
+                return;
             }
+
+            // 位置没有变化时不再重复下发，
+            // 否则会陷入「移动 → 触发 LocationChanged → 再移动」的无休止循环
+            if (Math.Abs(newLeft - window.Left) < 0.5 && Math.Abs(newTop - window.Top) < 0.5)
+            {
+                return;
+            }
+
+            window.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                window.Left = newLeft;
+                window.Top = newTop;
+
+                // 保存分区数据
+                PartitionDataService.Instance.SavePartitionData(window);
+            }));
+        }
+
+        /// <summary>
+        /// 对齐单个分区的尺寸
+        /// </summary>
+        /// <remarks>
+        /// 只对空分区有效（已经有内容的分区不允许因为对齐而改变尺寸），
+        /// 用于用户结束拖动/缩放后再做一次对齐，避免在交互过程中与用户互相拉扯。
+        /// </remarks>
+        public void AlignWindowSize(DesktopManagerWindow window)
+        {
+            if (window == null || isArrangingWindows)
+            {
+                return;
+            }
+
+            SnapWindowSize(window);
         }
 
         /// <summary>
         /// 窗口大小吸附功能
         /// </summary>
+        /// <remarks>
+        /// 只有空分区（尚未放置内容）才允许在自动对齐时同时调整尺寸：
+        /// 已经有内容的分区在拖动时通常只想移动位置，
+        /// 若此时被强行改回尺寸，用户刚调好的长宽就白调了。
+        /// </remarks>
         private void SnapWindowSize(DesktopManagerWindow window)
         {
+            // 已经有内容的分区：只做位置吸附，绝不改动尺寸
+            if (!window.IsEmptyPartition)
+            {
+                return;
+            }
+
+            // 交互过程中不做尺寸吸附，避免与用户的拖动互相拉扯造成抖动
+            if (window.IsInteracting)
+            {
+                return;
+            }
+
             // 获取除当前窗口外的所有可见窗口
             var otherWindows = managedWindows
                 .Where(w => w != window && w.IsVisible)
@@ -390,66 +458,105 @@ namespace Layouter.Services
 
             double newWidth = window.Width;
             double newHeight = window.Height;
-            bool snapped = false;
+            bool widthSnapped = false;
+            bool heightSnapped = false;
 
             // 是否应该吸附宽度到工作区边缘
             if (Math.Abs(window.Left + window.Width - (workArea.Width - WindowMargin)) < SnapThreshold)
             {
                 newWidth = workArea.Width - window.Left - WindowMargin;
-                snapped = true;
+                widthSnapped = true;
             }
 
             // 是否应该吸附高度到工作区边缘
             if (Math.Abs(window.Top + window.Height - (workArea.Height - WindowMargin)) < SnapThreshold)
             {
                 newHeight = workArea.Height - window.Top - WindowMargin;
-                snapped = true;
+                heightSnapped = true;
             }
 
             // 是否应该吸附到其他窗口的边缘
             foreach (var otherWindow in otherWindows)
             {
-                // 右边缘吸附到其他窗口左边缘
-                if (Math.Abs(window.Left + window.Width - (otherWindow.Left - WindowMargin)) < SnapThreshold)
+                // 宽高各自只认第一个命中的目标，
+                // 多个候选互相覆盖会让窗口在几个尺寸之间来回跳
+                if (!widthSnapped)
                 {
-                    newWidth = otherWindow.Left - window.Left - WindowMargin;
-                    snapped = true;
+                    // 右边缘吸附到其他窗口左边缘
+                    if (Math.Abs(window.Left + window.Width - (otherWindow.Left - WindowMargin)) < SnapThreshold)
+                    {
+                        newWidth = otherWindow.Left - window.Left - WindowMargin;
+                        widthSnapped = true;
+                    }
+                    // 右边缘吸附对齐
+                    else if (Math.Abs(window.Left + window.Width - (otherWindow.Left + otherWindow.Width)) < SnapThreshold)
+                    {
+                        newWidth = otherWindow.Left + otherWindow.Width - window.Left;
+                        widthSnapped = true;
+                    }
                 }
 
-                // 下边缘吸附到其他窗口上边缘
-                if (Math.Abs(window.Top + window.Height - (otherWindow.Top - WindowMargin)) < SnapThreshold)
+                if (!heightSnapped)
                 {
-                    newHeight = otherWindow.Top - window.Top - WindowMargin;
-                    snapped = true;
-                }
-
-                // 右边缘吸附对齐
-                if (Math.Abs(window.Left + window.Width - (otherWindow.Left + otherWindow.Width)) < SnapThreshold)
-                {
-                    newWidth = otherWindow.Left + otherWindow.Width - window.Left;
-                    snapped = true;
-                }
-
-                // 下边缘吸附对齐
-                if (Math.Abs(window.Top + window.Height - (otherWindow.Top + otherWindow.Height)) < SnapThreshold)
-                {
-                    newHeight = otherWindow.Top + otherWindow.Height - window.Top;
-                    snapped = true;
+                    // 下边缘吸附到其他窗口上边缘
+                    if (Math.Abs(window.Top + window.Height - (otherWindow.Top - WindowMargin)) < SnapThreshold)
+                    {
+                        newHeight = otherWindow.Top - window.Top - WindowMargin;
+                        heightSnapped = true;
+                    }
+                    // 下边缘吸附对齐
+                    else if (Math.Abs(window.Top + window.Height - (otherWindow.Top + otherWindow.Height)) < SnapThreshold)
+                    {
+                        newHeight = otherWindow.Top + otherWindow.Height - window.Top;
+                        heightSnapped = true;
+                    }
                 }
             }
 
-            // 更新窗口大小
-            if (snapped)
+            if (!widthSnapped && !heightSnapped)
             {
-                window.Dispatcher.BeginInvoke(new Action(() =>
+                return;
+            }
+
+            // 目标尺寸与当前一致时不再重复下发，
+            // 否则会陷入「改尺寸 → 触发 SizeChanged → 再改尺寸」的无休止循环
+            if (Math.Abs(newWidth - window.Width) < 0.5 && Math.Abs(newHeight - window.Height) < 0.5)
+            {
+                // 已经稳定下来，重置连续吸附计数
+                sizeSnapCounts.Remove(window.WindowId);
+                return;
+            }
+
+            // 连续改尺寸说明窗口和用户正在互相拉扯（甚至两个目标来回死循环），
+            // 超过上限就停手，交回给用户控制
+            int applied = sizeSnapCounts.TryGetValue(window.WindowId, out int count) ? count : 0;
+            if (applied >= MaxConsecutiveSizeSnaps)
+            {
+                return;
+            }
+            sizeSnapCounts[window.WindowId] = applied + 1;
+
+            // 同一时刻只允许一个尺寸吸附在排队，避免堆积成一长串任务把界面卡住
+            if (!pendingSizeSnaps.Add(window.WindowId))
+            {
+                return;
+            }
+
+            window.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                try
                 {
                     window.Width = newWidth;
                     window.Height = newHeight;
 
                     // 保存分区数据
                     PartitionDataService.Instance.SavePartitionData(window);
-                }));
-            }
+                }
+                finally
+                {
+                    pendingSizeSnaps.Remove(window.WindowId);
+                }
+            }));
         }
 
 

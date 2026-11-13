@@ -1,6 +1,11 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Threading;
 using Hardcodet.Wpf.TaskbarNotification;
 using Layouter.Utility;
@@ -10,17 +15,23 @@ namespace Layouter.Services
     /// <summary>
     /// 桌面双击事件服务。
     /// <para>
-    /// 采用「全局低级鼠标钩子（WH_MOUSE_LL）+ 隐藏桌面图标视图」的方案：
+    /// 采用「全局低级鼠标钩子（WH_MOUSE_LL）+ 隐藏桌面元素」的方案：
     /// 低级钩子的回调始终在当前进程内执行，不会去改写其它进程的窗口过程，
     /// 因此既不会让资源管理器失去响应，也不会在资源管理器重启后失效。
     /// </para>
     /// <para>
-    /// 隐藏动作通过 <c>ShowWindow(SysListView32, SW_HIDE)</c> 完成：
-    /// 只是把桌面图标视图临时隐藏，桌面上的文件一个都不会被移动，
-    /// 因此可以瞬时切换、完整还原，也不存在任何文件丢失的风险。
+    /// 「桌面净空」会隐藏桌面上所有可点击的元素：
+    /// 桌面图标、本程序的分区格子（含其中的图标）、以及第三方程序的顶层窗口（桌面挂件、浏览器等）。
+    /// 桌面背景（壁纸）、任务栏、开始菜单等系统外壳属于不可交互元素，始终保持可见。
     /// </para>
     /// <para>
-    /// 启用后，用户在桌面空白处双击即可隐藏 / 还原全部桌面图标；
+    /// 隐藏动作全部是可逆的：桌面图标视图用 <c>ShowWindow(SysListView32, SW_HIDE)</c> 临时隐藏，
+    /// 第三方窗口用 <c>SW_MINIMIZE</c> 最小化并记住句柄，
+    /// 分区格子用 WPF 的 <see cref="Visibility"/> 隐藏。
+    /// 因此可以瞬时切换、完整还原，桌面上的文件一个都不会被移动，也不存在任何文件丢失的风险。
+    /// </para>
+    /// <para>
+    /// 启用后，用户在桌面空白处双击即可隐藏 / 还原全部桌面元素；
     /// 双击图标本身仍然用于打开文件，不受影响。
     /// </para>
     /// </summary>
@@ -105,8 +116,20 @@ namespace Layouter.Services
         /// <remarks>LVM_HITTEST = LVM_FIRST(0x1000) + 12；不要误用 LVM_HITTESTLV(0x1012)，后者需要跨进程传指针。</remarks>
         private const int LVM_HITTEST = 0x100C;
 
+        /// <summary>ListView 条目总数消息</summary>
+        private const int LVM_GETITEMCOUNT = 0x1004;
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool IsWindow(IntPtr hWnd);
+
         private const int SW_HIDE = 0;
         private const int SW_SHOW = 5;
+
+        /// <summary>最小化第三方窗口（第三方程序对 SW_HIDE 的兼容性参差不齐，最小化更稳妥）</summary>
+        private const int SW_MINIMIZE = 6;
+
+        /// <summary>还原被最小化的窗口</summary>
+        private const int SW_RESTORE = 9;
 
         /// <summary>两次切换之间的最小间隔（毫秒），避免连点误触</summary>
         private const int TOGGLE_COOLDOWN_MS = 1200;
@@ -135,6 +158,20 @@ namespace Layouter.Services
         public bool DesktopIconsHidden { get; private set; }
 
         /// <summary>
+        /// 桌面元素（图标 + 分区格子 + 第三方窗口）当前是否处于隐藏状态
+        /// </summary>
+        public bool DesktopElementsHidden { get; private set; }
+
+        /// <summary>净空时被最小化的第三方窗口句柄（还原时按此表恢复）</summary>
+        private readonly List<IntPtr> minimizedWindows = new List<IntPtr>();
+
+        /// <summary>净空时被隐藏的分区窗口</summary>
+        private readonly List<Window> hiddenPartitionWindows = new List<Window>();
+
+        /// <summary>图标隐藏请求的序号，用于让过期的补隐藏任务自行退出</summary>
+        private int hideRequestId;
+
+        /// <summary>
         /// 注册桌面双击事件
         /// </summary>
         public void RegisterDesktopDoubleClickEvent()
@@ -156,9 +193,13 @@ namespace Layouter.Services
                 // 启动时统一恢复为「显示」状态：
                 // 无论是上次退出前隐藏的，还是异常退出残留的，都先恢复显示，
                 // 避免用户面对一个不知原因的空桌面
+                RestoreDesktopElements();
                 RestoreDesktopIcons();
 
                 StartWatchdog();
+
+                // 提前初始化 UI Automation 客户端，避免第一次双击时初始化耗时拖慢钩子回调
+                WarmUpAutomation();
 
                 Log.Information("已注册桌面双击事件");
             }
@@ -178,7 +219,8 @@ namespace Layouter.Services
                 StopWatchdog();
                 RemoveHook();
 
-                // 退出程序时把桌面图标恢复显示，避免用户面对一个「空桌面」而不知原因
+                // 退出程序时把桌面恢复原状，避免用户面对一个「空桌面」而不知原因
+                RestoreDesktopElements();
                 RestoreDesktopIcons();
 
                 Log.Information("已注销桌面双击事件");
@@ -385,7 +427,52 @@ namespace Layouter.Services
                 Log.Information($"保存桌面图标显示状态失败: {ex.Message}");
             }
 
+            if (show)
+            {
+                // 取消尚未执行的补隐藏
+                Interlocked.Increment(ref hideRequestId);
+            }
+            else
+            {
+                // 资源管理器在收到外壳刷新通知时会把图标视图重新显示出来，
+                // 这里安排几次延迟复查并补隐藏，避免图标闪一下又冒出来。
+                int requestId = Interlocked.Increment(ref hideRequestId);
+                ScheduleIconHideRecheck(desktopView, requestId);
+            }
+
             Log.Information(show ? "已恢复桌面图标" : "已隐藏桌面图标");
+        }
+
+        /// <summary>
+        /// 延迟复查桌面图标视图，必要时补一次隐藏
+        /// </summary>
+        private async void ScheduleIconHideRecheck(IntPtr desktopView, int requestId)
+        {
+            try
+            {
+                for (int i = 0; i < 10; i++)
+                {
+                    await Task.Delay(200).ConfigureAwait(false);
+
+                    // 期间已经切换过状态或改为显示 → 不再干预
+                    if (requestId != Volatile.Read(ref hideRequestId) || !DesktopIconsHidden)
+                    {
+                        return;
+                    }
+
+                    if (desktopView == IntPtr.Zero || !IsWindowVisible(desktopView))
+                    {
+                        continue;
+                    }
+
+                    ShowWindow(desktopView, SW_HIDE);
+                    Log.Information("桌面图标视图被系统重新显示，已补隐藏");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"复查桌面图标显示状态失败: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -400,6 +487,137 @@ namespace Layouter.Services
             }
 
             return desktopView;
+        }
+
+        #endregion
+
+        #region 桌面净空
+
+        /// <summary>
+        /// 切换「桌面净空」：隐藏 / 还原桌面上所有可点击的元素
+        /// </summary>
+        /// <remarks>
+        /// 隐藏范围：桌面图标、本程序的分区格子（含其中的图标）、第三方程序的顶层窗口（桌面挂件、浏览器等）。
+        /// 保留范围：桌面背景（壁纸）、任务栏、开始菜单等系统外壳与不可交互元素。
+        /// </remarks>
+        /// <returns>true 表示当前处于「已隐藏」状态</returns>
+        public bool ToggleDesktopElements()
+        {
+            try
+            {
+                if (DesktopElementsHidden)
+                {
+                    RestoreDesktopElements();
+                    return false;
+                }
+
+                HideDesktopElements();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"切换桌面元素显示状态失败: {ex.Message}");
+                return DesktopElementsHidden;
+            }
+        }
+
+        /// <summary>
+        /// 隐藏桌面上的可点击元素
+        /// </summary>
+        /// <param name="includeThirdPartyWindows">是否连同第三方程序的窗口一起隐藏</param>
+        private void HideDesktopElements(bool includeThirdPartyWindows = true)
+        {
+            IntPtr desktopView = ResolveDesktopView();
+
+            // 1) 桌面图标
+            if (desktopView != IntPtr.Zero && IsWindowVisible(desktopView))
+            {
+                ApplyDesktopIconsVisibility(desktopView, false);
+            }
+
+            // 2) 本程序的分区格子（含其中的图标）
+            foreach (var window in WindowManagerService.Instance.GetAllWindows().Cast<Window>())
+            {
+                if (window == null || !window.IsVisible)
+                {
+                    continue;
+                }
+
+                hiddenPartitionWindows.Add(window);
+
+                try
+                {
+                    window.Visibility = Visibility.Hidden;
+                }
+                catch (Exception ex)
+                {
+                    Log.Information($"隐藏分区窗口失败: {ex.Message}");
+                }
+            }
+
+            // 3) 第三方程序的窗口（桌面挂件、浏览器等）
+            if (includeThirdPartyWindows)
+            {
+                var scanner = new DesktopWindowScanner();
+
+                foreach (IntPtr hwnd in scanner.EnumerateHideableWindows(desktopView))
+                {
+                    if (ShowWindow(hwnd, SW_MINIMIZE))
+                    {
+                        minimizedWindows.Add(hwnd);
+                    }
+                }
+            }
+
+            DesktopElementsHidden = true;
+
+            Log.Information($"已隐藏桌面元素：分区窗口 {hiddenPartitionWindows.Count} 个，第三方窗口 {minimizedWindows.Count} 个");
+        }
+
+        /// <summary>
+        /// 还原桌面上的可点击元素
+        /// </summary>
+        public void RestoreDesktopElements()
+        {
+            // 1) 第三方窗口
+            foreach (IntPtr hwnd in minimizedWindows)
+            {
+                if (DesktopWindowScanner.IsValidWindow(hwnd))
+                {
+                    ShowWindow(hwnd, SW_RESTORE);
+                }
+            }
+            minimizedWindows.Clear();
+
+            // 2) 分区格子
+            foreach (var window in hiddenPartitionWindows)
+            {
+                if (window == null)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    window.Visibility = Visibility.Visible;
+                }
+                catch (Exception ex)
+                {
+                    Log.Information($"还原分区窗口失败: {ex.Message}");
+                }
+            }
+            hiddenPartitionWindows.Clear();
+
+            // 3) 桌面图标
+            IntPtr desktopView = ResolveDesktopView();
+            if (desktopView != IntPtr.Zero && !IsWindowVisible(desktopView))
+            {
+                ApplyDesktopIconsVisibility(desktopView, true);
+            }
+
+            DesktopElementsHidden = false;
+
+            Log.Information("已还原桌面元素");
         }
 
         #endregion
@@ -490,21 +708,22 @@ namespace Layouter.Services
                     return;
                 }
 
-                // 双击落在图标上时不处理，保留「双击打开文件」的默认行为
-                if (IsPointOnDesktopIcon(desktopView, screenPoint))
+                // 双击落在图标上时不处理，保留「双击打开文件」的默认行为。
+                // 只有真正点在桌面空白处才会触发切换。
+                if (!DesktopElementsHidden && IsPointOnDesktopIcon(desktopView, screenPoint))
                 {
                     return;
                 }
 
                 lastToggleTime = now;
 
-                bool hidden = ToggleDesktopIcons();
+                bool hidden = ToggleDesktopElements();
 
                 string message = hidden
-                    ? "已隐藏桌面图标，再次双击桌面即可恢复"
-                    : "已恢复桌面图标";
+                    ? "已隐藏桌面元素（图标、分区、桌面软件），再次双击桌面即可恢复"
+                    : "已恢复桌面元素";
 
-                TrayIconService.Instance.ShowBalloonTip("桌面图标", message, BalloonIcon.Info);
+                TrayIconService.Instance.ShowBalloonTip("桌面元素", message, BalloonIcon.Info);
             }
             catch (Exception ex)
             {
@@ -515,11 +734,16 @@ namespace Layouter.Services
         /// <summary>
         /// 判断屏幕坐标是否位于窗口范围内
         /// </summary>
+        /// <remarks>
+        /// 桌面图标视图被资源管理器重建的短时间内，取不到有效矩形（0,0,0,0）。
+        /// 此时不做限制，真正的「是否点在桌面上」由 <see cref="IsPointOnDesktop"/> 判断，
+        /// 避免因为视图重建的空档期让双击失效。
+        /// </remarks>
         private static bool IsPointInWindow(IntPtr hwnd, Point screenPoint)
         {
             try
             {
-                if (GetWindowRect(hwnd, out RECT rect))
+                if (GetWindowRect(hwnd, out RECT rect) && rect.Right > rect.Left && rect.Bottom > rect.Top)
                 {
                     return screenPoint.X >= rect.Left && screenPoint.X < rect.Right &&
                            screenPoint.Y >= rect.Top && screenPoint.Y < rect.Bottom;
@@ -529,7 +753,8 @@ namespace Layouter.Services
             {
                 Log.Information($"桌面窗口范围判断失败: {ex.Message}");
             }
-            return false;
+
+            return true;
         }
 
         /// <summary>
@@ -549,6 +774,15 @@ namespace Layouter.Services
                     return true;
                 }
 
+                // 命中桌面本身（壁纸窗口）也算双击在桌面上。
+                // 净空模式下图标视图已被隐藏，命中的是 Progman / WorkerW 这一层。
+                string className = DesktopWindowScanner.GetClassName(windowAtPoint);
+                if (string.Equals(className, "Progman", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(className, "WorkerW", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
                 IntPtr rootAtPoint = Win32.GetAncestor(windowAtPoint, Win32.GA_ROOT);
                 IntPtr rootOfDesktop = Win32.GetAncestor(desktopView, Win32.GA_ROOT);
 
@@ -562,12 +796,38 @@ namespace Layouter.Services
         }
 
         /// <summary>
-        /// 判断双击位置是否命中了桌面图标
+        /// 判断双击位置是否命中了桌面上的图标
         /// </summary>
+        /// <remarks>
+        /// 资源管理器会不定时重建桌面图标视图，重建后的短时间内视图里还没有条目，
+        /// 此时原生的 <c>LVM_HITTEST</c> 必然返回「未命中」，
+        /// 会把图标位置误判成桌面空白，导致双击图标时误触发切换。
+        /// 因此这里先用原生命中测试走快路径，再用 UI Automation 交叉验证一次。
+        /// </remarks>
         private static bool IsPointOnDesktopIcon(IntPtr hwnd, Point screenPoint)
+        {
+            // 快路径：原生命中测试
+            if (TryHitTestDesktopIcon(hwnd, screenPoint))
+            {
+                return true;
+            }
+
+            // 交叉验证：UI Automation 直接查询光标下的元素
+            return IsPointOnIconByAutomation(hwnd, screenPoint);
+        }
+
+        /// <summary>
+        /// 用 ListView 的原生命中测试判断位置是否落在图标上
+        /// </summary>
+        private static bool TryHitTestDesktopIcon(IntPtr hwnd, Point screenPoint)
         {
             try
             {
+                if (hwnd == IntPtr.Zero || !IsWindow(hwnd))
+                {
+                    return false;
+                }
+
                 var clientPoint = new POINT { X = (int)screenPoint.X, Y = (int)screenPoint.Y };
                 if (!ScreenToClient(hwnd, ref clientPoint))
                 {
@@ -584,6 +844,82 @@ namespace Layouter.Services
                 Log.Information($"桌面图标命中测试失败: {ex.Message}");
                 return false;
             }
+        }
+
+        /// <summary>
+        /// 用 UI Automation 查询光标下的元素，判断是否落在桌面图标上
+        /// </summary>
+        /// <remarks>
+        /// 桌面图标由外壳渲染，UI Automation 能拿到每个图标的元素与位置；
+        /// 命中图标视图本身的子元素即说明点在图标上，命中视图本身则是空白区域。
+        /// </remarks>
+        private static bool IsPointOnIconByAutomation(IntPtr hwnd, Point screenPoint)
+        {
+            try
+            {
+                if (hwnd == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                AutomationElement element = AutomationElement.FromPoint(new Point(screenPoint.X, screenPoint.Y));
+                if (element == null)
+                {
+                    return false;
+                }
+
+                int viewHandle = hwnd.ToInt32();
+
+                // 命中的就是图标视图本身 → 说明是空白区域
+                if (element.Current.NativeWindowHandle == viewHandle)
+                {
+                    return false;
+                }
+
+                // 向上回溯，确认该元素确实属于桌面图标视图
+                var walker = TreeWalker.ControlViewWalker;
+                AutomationElement current = element;
+
+                for (int i = 0; i < 8 && current != null; i++)
+                {
+                    if (current.Current.NativeWindowHandle == viewHandle)
+                    {
+                        return true;
+                    }
+
+                    current = walker.GetParent(current);
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"UI Automation 命中桌面图标失败: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 预热 UI Automation 客户端
+        /// </summary>
+        /// <remarks>
+        /// 第一次调用 <see cref="AutomationElement.FromPoint(Point)"/> 需要初始化 UIA 客户端，
+        /// 耗时可达几十到几百毫秒。低级鼠标钩子对回调耗时很敏感（超时会被系统摘钩），
+        /// 因此启动时先在后台线程调用一次，把初始化开销挪到启动阶段。
+        /// </remarks>
+        private static void WarmUpAutomation()
+        {
+            Task.Run(() =>
+            {
+                try
+                {
+                    AutomationElement.FromPoint(new Point(1, 1));
+                }
+                catch
+                {
+                    // 预热失败不影响功能，后续调用会自行重试
+                }
+            });
         }
     }
 }

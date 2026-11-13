@@ -33,6 +33,7 @@ namespace Layouter.Views
         private bool isAdjustingSize = false; // 是否正在调整窗口大小
         private bool isSnapPending = false;
         private DateTime lastSizeSnapTime = DateTime.MinValue;
+        private Size sizeBeforeInteraction = Size.Empty; // 进入移动/缩放模态循环前的尺寸
 
         private DateTime lastClickTime = DateTime.MinValue;
         private DesktopIcon lastClickedIcon = null;
@@ -99,6 +100,29 @@ namespace Layouter.Views
         }
 
         public string WindowId { get; set; }
+
+        /// <summary>
+        /// 分区是否为空（尚未放置任何内容）
+        /// </summary>
+        /// <remarks>
+        /// 对齐功能据此区分：已经有内容的分区只做位置吸附，不改尺寸；
+        /// 空分区才允许在自动对齐时同时调整尺寸。
+        /// </remarks>
+        public bool IsEmptyPartition
+        {
+            get
+            {
+                return DataContext is not DesktopManagerViewModel viewModel || viewModel.Icons.Count == 0;
+            }
+        }
+
+        /// <summary>
+        /// 当前是否处于移动/缩放交互中
+        /// </summary>
+        /// <remarks>
+        /// 交互过程中不做尺寸吸附，避免与用户的拖动互相拉扯造成抖动。
+        /// </remarks>
+        public bool IsInteracting => isResizing;
 
         #region 分区窗口事件
 
@@ -237,15 +261,36 @@ namespace Layouter.Views
             if (msg == (int)WindowsMessage.WM_ENTERSIZEMOVE)
             {
                 isResizing = true;
+
+                // 记录交互前的尺寸：移动与缩放都会进入这套模态循环，
+                // 结束后靠尺寸是否变化来区分「移动」与「缩放」。
+                sizeBeforeInteraction = new Size(Width, Height);
+
                 UpdateWindowOpacity();
             }
             else if (msg == (int)WindowsMessage.WM_EXITSIZEMOVE)
             {
-                if (isResizing && Mouse.LeftButton != MouseButtonState.Pressed)
+                if (isResizing)
                 {
                     isResizing = false;
                     UpdateWindowOpacity();
-                    QueueWindowSizeSnap();
+
+                    // 鼠标仍按着说明这次拖动还没真正结束，先不做任何对齐
+                    if (Mouse.LeftButton != MouseButtonState.Pressed)
+                    {
+                        // 只有真的改了尺寸才按图标网格对齐。
+                        // 单纯移动位置时保持分区现有的长宽不变——
+                        // 用户拖动分区通常只是想挪个位置，尺寸被改动就得重新调一遍。
+                        if (Math.Abs(Width - sizeBeforeInteraction.Width) > 0.5
+                            || Math.Abs(Height - sizeBeforeInteraction.Height) > 0.5)
+                        {
+                            QueueWindowSizeSnap();
+                        }
+
+                        // 交互结束后再做一次对齐：
+                        // 空分区允许在自动对齐时调整尺寸，交互过程中不做，避免与用户互相拉扯
+                        WindowManagerService.Instance.AlignWindowSize(this);
+                    }
                 }
             }
 
@@ -381,8 +426,13 @@ namespace Layouter.Views
         }
 
         /// <summary>
-        /// 按图标大小的整倍数调整窗口尺寸
+        /// 按图标网格调整窗口尺寸
         /// </summary>
+        /// <remarks>
+        /// 用户拖动分区后，窗口会对齐成「n 行 m 列」的网格结构。
+        /// 行数与列数由用户拖出的尺寸决定（能完整放下多少行/列就取多少），
+        /// 而不是按图标总量把窗口撑满——放不下的图标交给垂直滚动条查看。
+        /// </remarks>
         private void SnapWindowSizeToIconGrid()
         {
             if (vm == null || vm.IsLocked || isRolledUp || isAdjustingSize)
@@ -390,8 +440,15 @@ namespace Layouter.Views
                 return;
             }
 
+            // 空分区（尚未放置内容）不按图标网格约束尺寸：
+            // 它的尺寸交给分区对齐功能处理，避免两套规则互相拉扯。
+            if (vm.Icons.Count == 0)
+            {
+                return;
+            }
+
             // 先按真实渲染高度校准：图标名称换行后实际高度更大，
-            // 不校准的话这里会算出一个偏小的高度，窗口里就会出现滚动条。
+            // 不校准的话这里会算出一个偏小的高度，行数就会少算。
             SyncIconItemHeight();
 
             var cellSize = vm.GetIconCellSize();
@@ -402,27 +459,50 @@ namespace Layouter.Views
 
             var spacing = DesktopManagerViewModel.IconSpacing;
             var titleHeight = GetTitleBarHeight();
-            var iconMargin = iconsContainer?.Margin ?? new Thickness(0);
-            var availableWidth = Math.Max(cellSize.Width + spacing * 2, Width - iconMargin.Left - iconMargin.Right);
-            var availableHeight = Math.Max(cellSize.Height + spacing * 2, Height - titleHeight - iconMargin.Top - iconMargin.Bottom);
+            var iconMargin = GetIconContainerMargin();
 
-            // 列表视图按行排列，行距与图标网格无关
-            double rowPitch = vm.IsListView ? DesktopManagerViewModel.ListRowHeight : cellSize.Height + spacing;
+            // 以实测的图标区尺寸为基准：窗口边框会占掉一部分宽高，
+            // 直接用 Width/Height 推算容易差出半格，列数行数就会算错。
+            double clientWidth = GetIconClientWidth();
+            double clientHeight = GetIconClientHeight();
+            double frameWidth = Math.Max(0, Width - clientWidth);
+            double frameHeight = Math.Max(0, Height - titleHeight - clientHeight);
 
-            var columns = Math.Max(1, (int)Math.Round((availableWidth - spacing) / (cellSize.Width + spacing)));
-            var rows = Math.Max(1, (int)Math.Round((availableHeight - spacing) / rowPitch));
+            double availableWidth = clientWidth - iconMargin.Left - iconMargin.Right;
+            double availableHeight = clientHeight - iconMargin.Top - iconMargin.Bottom;
 
-            var newAvailableWidth = columns * cellSize.Width + (columns + 1) * spacing;
-            var newAvailableHeight = vm.IsListView
-                ? rows * DesktopManagerViewModel.ListRowHeight
-                : rows * cellSize.Height + (rows + 1) * spacing;
+            double newWidth;
+            double newHeight;
+            double gridWidth;
+            double gridHeight;
 
-            // 列表视图的宽度与图标网格无关，保持用户设定的宽度
-            var newWidth = vm.IsListView ? Width : Math.Ceiling(newAvailableWidth + iconMargin.Left + iconMargin.Right);
-            var newHeight = Math.Ceiling(titleHeight + newAvailableHeight + iconMargin.Top + iconMargin.Bottom);
+            if (vm.IsListView)
+            {
+                // 列表视图：宽度与图标网格无关，保持用户设定的宽度；
+                // 高度按整行对齐，放不下的行由滚动条承载。
+                int rows = Math.Max(1, (int)Math.Floor((availableHeight - spacing) / DesktopManagerViewModel.ListRowHeight));
 
-            // 以实际内容高度兜底：换行导致内容更高时直接加高窗口，避免出现滚动条
-            newHeight = Math.Max(newHeight, GetRequiredContentHeight(titleHeight, iconMargin));
+                gridWidth = availableWidth;
+                gridHeight = rows * DesktopManagerViewModel.ListRowHeight;
+
+                newWidth = Width;
+                newHeight = Math.Ceiling(titleHeight + gridHeight + iconMargin.Top + iconMargin.Bottom + frameHeight);
+            }
+            else
+            {
+                // 网格视图：按用户拖出的尺寸算出能完整放下的行列数，
+                // 再把窗口对齐成这个 n 行 m 列的网格。
+                int columns = vm.CalculateColumnCount(availableWidth - GetReservedScrollBarWidth());
+                int rows = vm.CalculateRowCount(availableHeight);
+
+                // 网格尺寸统一由 ViewModel 计算，避免视图层再抄一份公式
+                gridWidth = vm.GetGridWidth(columns);
+                gridHeight = vm.GetGridHeight(rows);
+
+                newWidth = Math.Ceiling(gridWidth + iconMargin.Left + iconMargin.Right
+                    + GetReservedScrollBarWidth() + frameWidth);
+                newHeight = Math.Ceiling(titleHeight + gridHeight + iconMargin.Top + iconMargin.Bottom + frameHeight);
+            }
 
             if (Math.Abs(Width - newWidth) > 0.5 || Math.Abs(Height - newHeight) > 0.5)
             {
@@ -431,15 +511,12 @@ namespace Layouter.Views
                     isAdjustingSize = true;
                     Width = newWidth;
                     Height = newHeight;
-                    UpdatePartitionSizeFromLayout();
-                    vm.ArrangeIcons();
 
-                    // 宽度变化可能改变行数，这里再兜底一次，保证不会出现滚动条
-                    double requiredHeight = GetRequiredContentHeight(titleHeight, iconMargin);
-                    if (Height < requiredHeight)
-                    {
-                        Height = Math.Ceiling(requiredHeight);
-                    }
+                    // 窗口尺寸刚改完，实测宽度还没刷新，这里直接按新网格更新分区尺寸，
+                    // 免得用旧宽度算列数，导致排布和窗口对不上。
+                    UpdatePartitionSizeFromGrid(gridWidth, gridHeight);
+
+                    vm.ArrangeIcons();
 
                     lastSizeSnapTime = DateTime.UtcNow;
                 }
@@ -451,16 +528,68 @@ namespace Layouter.Views
         }
 
         /// <summary>
-        /// 计算「不出现滚动条」所需的窗口高度
+        /// 获取当前图标容器的内边距
         /// </summary>
-        private double GetRequiredContentHeight(double titleHeight, Thickness iconMargin)
+        private Thickness GetIconContainerMargin()
         {
-            if (vm == null)
+            var container = vm != null && vm.IsListView ? iconsListContainer : iconsContainer;
+            return container?.Margin ?? new Thickness(0);
+        }
+
+        /// <summary>
+        /// 获取图标区（滚动容器）的实际宽度
+        /// </summary>
+        private double GetIconClientWidth()
+        {
+            var viewer = vm != null && vm.IsListView ? IconsListScrollViewer : IconsScrollViewer;
+
+            if (viewer != null && viewer.ActualWidth > 0)
             {
-                return 0;
+                return viewer.ActualWidth;
             }
 
-            return Math.Ceiling(titleHeight + vm.IconsContentHeight + iconMargin.Top + iconMargin.Bottom);
+            return Width;
+        }
+
+        /// <summary>
+        /// 获取图标区（滚动容器）的实际高度
+        /// </summary>
+        private double GetIconClientHeight()
+        {
+            if (IconsContainer != null && IconsContainer.ActualHeight > 0)
+            {
+                return IconsContainer.ActualHeight;
+            }
+
+            return Math.Max(0, Height - GetTitleBarHeight());
+        }
+
+        /// <summary>
+        /// 获取网格视图需要预留的垂直滚动条宽度
+        /// </summary>
+        /// <remarks>
+        /// 网格视图固定按「预留滚动条」的宽度排布，滚动条是否真的显示由图标数量决定。
+        /// 预留宽度必须与实际渲染出来的滚动条一致，否则滚动条出现时会挡住最右侧一列。
+        /// </remarks>
+        private double GetReservedScrollBarWidth()
+        {
+            double width = 0;
+
+            try
+            {
+                if (IconsScrollViewer != null
+                    && IconsScrollViewer.Template != null
+                    && IconsScrollViewer.Template.FindName("VerticalScrollBar", IconsScrollViewer) is System.Windows.Controls.Primitives.ScrollBar scrollBar)
+                {
+                    width = scrollBar.Width;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"读取垂直滚动条宽度失败: {ex.Message}");
+            }
+
+            return width > 0 ? width : SystemParameters.VerticalScrollBarWidth;
         }
 
         /// <summary>
@@ -611,6 +740,9 @@ namespace Layouter.Views
             }), DispatcherPriority.ContextIdle);
         }
 
+        /// <summary>
+        /// 按当前布局更新分区尺寸
+        /// </summary>
         private void UpdatePartitionSizeFromLayout()
         {
             if (vm == null)
@@ -618,35 +750,40 @@ namespace Layouter.Views
                 return;
             }
 
-            var iconMargin = iconsContainer?.Margin ?? new Thickness(0);
+            var iconMargin = GetIconContainerMargin();
 
-            // 使用当前可见的图标容器宽度：出现滚动条时可视区域会变窄，
-            // 图标需要按新的列数重新排布，否则最右侧一列会被滚动条遮住。
-            var container = vm.IsListView ? iconsListContainer : iconsContainer;
+            double clientWidth = GetIconClientWidth();
+            double clientHeight = GetIconClientHeight();
 
-            double width;
+            double width = clientWidth - iconMargin.Left - iconMargin.Right;
+            double height = clientHeight - iconMargin.Top - iconMargin.Bottom;
 
-            if (!vm.IsListView && IconsScrollViewer != null && IconsScrollViewer.ActualWidth > 0)
+            if (!vm.IsListView)
             {
                 // 网格视图固定预留垂直滚动条的宽度：滚动条是否显示取决于图标数量，
                 // 若按「当前可视宽度」排布，滚动条出现/隐藏会引起列数来回变化。
-                width = IconsScrollViewer.ActualWidth
-                    - iconMargin.Left
-                    - iconMargin.Right
-                    - SystemParameters.VerticalScrollBarWidth;
+                width -= GetReservedScrollBarWidth();
             }
-            else
+
+            UpdatePartitionSizeFromGrid(width, height);
+        }
+
+        /// <summary>
+        /// 按图标内容区尺寸更新分区尺寸
+        /// </summary>
+        /// <remarks>
+        /// 网格视图的列数、列表视图的行数都基于这个尺寸计算，
+        /// 因此这里给的是扣除内边距与预留滚动条之后的净尺寸。
+        /// </remarks>
+        private void UpdatePartitionSizeFromGrid(double contentWidth, double contentHeight)
+        {
+            if (vm == null)
             {
-                width = container != null && container.ActualWidth > 0
-                    ? container.ActualWidth
-                    : (IconsContainer?.ActualWidth > 0 ? IconsContainer.ActualWidth : Width);
+                return;
             }
 
-            double height = IconsContainer?.ActualHeight > 0 ? IconsContainer.ActualHeight : Math.Max(0, Height - GetTitleBarHeight());
-
-            // 容器自身已经扣除了内边距，这里不再重复扣减
-            vm.PartitionWidth = Math.Max(1, width);
-            vm.PartitionHeight = Math.Max(1, height - iconMargin.Top - iconMargin.Bottom);
+            vm.PartitionWidth = Math.Max(1, contentWidth);
+            vm.PartitionHeight = Math.Max(1, contentHeight);
         }
 
         private double GetTitleBarHeight()
@@ -1604,6 +1741,9 @@ namespace Layouter.Views
             {
                 DesktopIcon newIcon = null;
 
+                // 本次拖入的条目：记录原始路径与对应图标，便于搬运完成后回写路径
+                var droppedItems = new List<DroppedItem>();
+
                 // 放置点坐标 - 以Panel为相对坐标系
                 double x = dropPoint.X;
                 double y = dropPoint.Y;
@@ -1635,20 +1775,29 @@ namespace Layouter.Views
                         foreach (string filePath in files)
                         {
                             // 检查是否已经在这个分区中 - 如果已存在则跳过此文件
-                            if (viewModel.Icons.Any(i => i.IconPath.Equals(filePath, StringComparison.OrdinalIgnoreCase)))
+                            // 分区里已有的图标记的是存放路径，这里把两种写法都比对一遍
+                            string predictedStoredPath = DesktopIconService.Instance.CombineHiddenPathWithIconPath(filePath);
+                            if (viewModel.Icons.Any(i =>
+                                    string.Equals(i.IconPath, filePath, StringComparison.OrdinalIgnoreCase)
+                                    || string.Equals(i.IconPath, predictedStoredPath, StringComparison.OrdinalIgnoreCase)))
                             {
                                 continue;
                             }
 
                             // 为每个文件创建新的图标对象
+                            // 图标路径先指向桌面上的原始文件：搬运开始前图标就能正确显示，
+                            // 搬运成功后再切换成存放路径；搬运失败则保持原路径，文件仍在桌面上。
                             DesktopIcon icon = new DesktopIcon
                             {
                                 Id = Guid.NewGuid().ToString(),
                                 Position = new Point(x, y),
                                 Size = iconSize,
                                 TextSize = viewModel.IconTextSize,
-                                IconPath = DesktopIconService.Instance.CombineHiddenPathWithIconPath(filePath)
+                                IconPath = filePath
                             };
+
+                            // 是否需要搬运到隐藏存储（Shell 虚拟项只需切换可见性）
+                            bool needsMove = true;
 
                             // 根据文件类型设置图标属性
                             if (filePath.Equals(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)))
@@ -1657,6 +1806,7 @@ namespace Layouter.Views
                                 icon.Name = userProfile;
                                 icon.IconPath = ShellUtil.MapSpecialFolderByName(userProfile);
                                 icon.IconType = IconType.Shell;
+                                needsMove = false;
                             }
                             else if (ShortCutUtil.IsShortcutPath(filePath))
                             {
@@ -1677,6 +1827,7 @@ namespace Layouter.Views
                             {
                                 icon.Name = ShellUtil.GetSpecialFolderDisplayName(filePath);
                                 icon.IconType = IconType.Shell;
+                                needsMove = false;
                             }
 
                             if (flag)
@@ -1687,6 +1838,13 @@ namespace Layouter.Views
 
                             // 将图标添加到列表中
                             newIcons.Add(icon);
+
+                            droppedItems.Add(new DroppedItem
+                            {
+                                OriginalPath = filePath,
+                                Icon = icon,
+                                NeedsMove = needsMove
+                            });
 
                             // 稍微偏移下一个图标的位置,避免完全重叠
                             x += 20;
@@ -1751,58 +1909,36 @@ namespace Layouter.Views
                 {
                     // 注意：图标已经在前面的代码中添加到视图模型中,这里不需要再次添加
 
-                    // 重要顺序：必须先隐藏桌面原图标（此步会写入隐藏存储索引），
-                    // 再保存分区数据。否则索引里还没有原始路径映射，
-                    // 落盘的就是隐藏存储路径，备份 / 还原后图标会变成无法使用的空壳。
-                    if (!flag && data.GetDataPresent(DataFormats.FileDrop))
+                    // 先把分区数据落盘：此刻图标记录的是桌面上的原始路径，
+                    // 搬运完成后会再保存一次（记录存放路径）。
+                    // 这样即使搬运途中程序退出，重新启动也能凭原始路径找回文件。
+                    SavePartitionData();
+
+                    // 收集需要搬到隐藏存储的项目（Shell 虚拟项只切换可见性，不搬运）
+                    var hideTargets = new List<HideTarget>();
+
+                    if (!flag)
                     {
-                        var files = data.GetData(DataFormats.FileDrop) as string[];
-                        if (files != null && files.Length > 0)
+                        foreach (var item in droppedItems)
                         {
-                            // 处理所有拖放的文件
-                            foreach (string filePath in files)
+                            if (item.NeedsMove)
                             {
-                                // 跳过特殊Shell类型的图标
-                                bool isShellType = viewModel.Icons.Any(i => i.IconPath.Equals(filePath, StringComparison.OrdinalIgnoreCase) && i.IconType == IconType.Shell);
-                                if (isShellType)
-                                {
-                                    continue;
-                                }
-
-                                //确保图标路径为桌面图标路径
-                                string desktopPath = DesktopIconService.Instance.RemoveHiddenPathInIconPath(filePath);
-                                // 隐藏桌面上的原图标，并取回真实存放路径
-                                bool hidden = DesktopIconService.Instance.HideDesktopIcon(desktopPath, out string storedPath);
-
-                                if (!hidden)
-                                {
-                                    Log.Information($"警告：无法隐藏桌面上的图标,但仍会将其添加到分区：{desktopPath}");
-                                    continue;
-                                }
-
-                                Log.Information($"成功隐藏桌面上的图标：{desktopPath}");
-
-                                // 把图标路径更新为真实的存放路径，避免保存下预测值
-                                string predictedPath = DesktopIconService.Instance.CombineHiddenPathWithIconPath(desktopPath);
-                                foreach (var added in viewModel.Icons.Where(i =>
-                                    string.Equals(i.IconPath, predictedPath, StringComparison.OrdinalIgnoreCase) ||
-                                    string.Equals(i.IconPath, desktopPath, StringComparison.OrdinalIgnoreCase)))
-                                {
-                                    added.IconPath = storedPath;
-                                }
+                                hideTargets.Add(new HideTarget { OriginalPath = item.OriginalPath, Icon = item.Icon });
                             }
                         }
                     }
-                    // 处理Shell类型的图标
-                    foreach (var icon in viewModel.Icons.Where(i => i.IconType == IconType.Shell))
+
+                    // 处理本次拖入的 Shell 类型图标（只切换可见性，不搬运文件）
+                    foreach (var item in droppedItems.Where(d => d.Icon.IconType == IconType.Shell))
                     {
-                        var filePath = DesktopIconService.Instance.RemoveHiddenPathInIconPath(icon.IconPath);
-                        // 隐藏桌面上的原图标
-                        DesktopIconService.Instance.HideDesktopIcon(filePath);
+                        string shellPath = DesktopIconService.Instance.RemoveHiddenPathInIconPath(item.Icon.IconPath);
+                        DesktopIconService.Instance.HideDesktopIcon(shellPath, out _, refreshDesktop: false);
                     }
 
-                    // 隐藏处理完成后再保存分区数据，确保落盘的路径可以被正确还原
-                    SavePartitionData();
+                    // 搬运放到后台线程：文件可能很大、目录可能包含上万个文件，
+                    // 放在界面线程上会让整个程序假死。
+                    // 图标已经先加入分区，用户可以立即继续操作。
+                    StartBackgroundHide(hideTargets);
 
                     // 延迟执行排列,确保新图标已经加入集合
                     Application.Current.Dispatcher.BeginInvoke(new Action(() =>
@@ -1823,6 +1959,124 @@ namespace Layouter.Views
                 Log.Information($"处理拖放时出错: {ex.Message}\n{ex.StackTrace}");
                 return false;
             }
+        }
+
+        /// <summary>
+        /// 后台搬运的目标：桌面原始路径 + 分区里对应的图标
+        /// </summary>
+        private class HideTarget
+        {
+            public string OriginalPath { get; set; } = string.Empty;
+            public DesktopIcon Icon { get; set; }
+        }
+
+        /// <summary>
+        /// 本次拖入的条目：原始路径 + 图标 + 是否需要搬运到隐藏存储
+        /// </summary>
+        private class DroppedItem
+        {
+            public string OriginalPath { get; set; } = string.Empty;
+            public DesktopIcon Icon { get; set; }
+            public bool NeedsMove { get; set; }
+        }
+
+        /// <summary>
+        /// 搬运队列：同一时间只允许一批搬运在执行，避免多批次同时写索引互相覆盖
+        /// </summary>
+        private static readonly SemaphoreSlim hideQueue = new SemaphoreSlim(1, 1);
+
+        /// <summary>
+        /// 在后台线程完成「把桌面项目搬进隐藏存储」的工作
+        /// </summary>
+        /// <remarks>
+        /// 大文件、大目录的搬运可能耗时数秒，放在界面线程上会直接冻结整个程序；
+        /// 这里放到后台串行执行，界面全程可操作。
+        /// </remarks>
+        private void StartBackgroundHide(List<HideTarget> targets)
+        {
+            if (targets == null || targets.Count == 0)
+            {
+                return;
+            }
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await hideQueue.WaitAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    Log.Information($"等待搬运队列失败: {ex.Message}");
+                    return;
+                }
+
+                try
+                {
+                    var started = DateTime.UtcNow;
+
+                    // 标题栏显示搬运进度
+                    await Dispatcher.InvokeAsync(() => vm?.BeginTransfer(targets.Count));
+
+                    var results = DesktopIconService.Instance.HideDesktopIcons(
+                        targets.Select(t => t.OriginalPath).ToList(),
+                        (completed, total) =>
+                        {
+                            // 进度回调发生在后台线程，需要切回界面线程刷新标题栏
+                            Dispatcher.Invoke(() => vm?.UpdateTransfer(completed, total));
+                        });
+
+                    // 结果写回界面（图标路径要换成真实存放路径）
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        int succeeded = 0;
+
+                        for (int i = 0; i < results.Count && i < targets.Count; i++)
+                        {
+                            HideIconResult result = results[i];
+                            HideTarget target = targets[i];
+
+                            if (result.Success)
+                            {
+                                succeeded++;
+
+                                if (target.Icon != null)
+                                {
+                                    target.Icon.IconPath = result.StoredPath;
+                                }
+                            }
+                            else if (target.Icon != null)
+                            {
+                                // 搬运失败时文件仍在桌面，图标保持原始路径，
+                                // 避免分区里留下打不开的空壳图标
+                                target.Icon.IconPath = target.OriginalPath;
+                                Log.Information($"搬运失败，图标保留原始路径: {target.OriginalPath}");
+                            }
+                        }
+
+                        // 路径已更新，重新落盘
+                        SavePartitionData();
+                        vm?.ArrangeIcons();
+
+                        // 结束进度显示
+                        vm?.EndTransfer();
+
+                        double elapsed = (DateTime.UtcNow - started).TotalSeconds;
+                        Log.Information($"后台搬运完成：成功 {succeeded} / {results.Count}，耗时 {elapsed:F1} 秒");
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Log.Information($"后台搬运失败: {ex.Message}");
+
+                    // 出错也要把进度条收掉，否则会一直显示「正在移动」
+                    await Dispatcher.InvokeAsync(() => vm?.EndTransfer());
+                }
+                finally
+                {
+                    hideQueue.Release();
+                }
+            });
         }
 
         private DesktopIcon CreateIconFromShellItem(ShellItemInfo item, Point point, Size iconSize)
