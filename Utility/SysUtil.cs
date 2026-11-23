@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
+using Layouter.Services;
 using Microsoft.VisualBasic;
 
 namespace Layouter.Utility
@@ -23,8 +24,12 @@ namespace Layouter.Utility
         {
             IntPtr hwnd = GetWindowHandle(win);
 
+            // 以桌面视图为 owner：Win+D / 显示桌面时不会随普通窗口一起最小化
             DesktopUtil.SetShellViewAsOwnerWindow(hwnd);
             DesktopUtil.SetAsToolWindow(hwnd);
+
+            // 共享 owner 会让 Windows 在激活任一窗口时整组上浮，由该服务负责压回桌面层级
+            DesktopLayerService.Track(win);
         }
 
         public static bool IsWindows11()

@@ -151,9 +151,11 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
 
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="透明度" Style="{StaticResource FormLabelStyle}"/>
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="选中时透明度" Style="{StaticResource FormLabelStyle}"/>
                         <Grid Grid.Row="0" Grid.Column="1" Margin="0,4,0,4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
@@ -170,8 +172,25 @@
                                        Style="{StaticResource AppMutedText}"/>
                         </Grid>
 
-                        <TextBlock Grid.Row="1" Grid.Column="0" Text="图标大小" Style="{StaticResource FormLabelStyle}"/>
-                        <ComboBox Grid.Row="1" Grid.Column="1"
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="未选中时透明度" Style="{StaticResource FormLabelStyle}"/>
+                        <Grid Grid.Row="1" Grid.Column="1" Margin="0,4,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Slider x:Name="InactiveOpacitySlider"
+                                    Minimum="0.3" Maximum="1.0" Value="0.63"
+                                    TickFrequency="0.05" IsSnapToTickEnabled="True"
+                                    ValueChanged="InactiveOpacitySlider_ValueChanged"/>
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding ElementName=InactiveOpacitySlider, Path=Value, StringFormat={}{0:P0}}"
+                                       VerticalAlignment="Center" Margin="10,0,0,0"
+                                       MinWidth="40"
+                                       Style="{StaticResource AppMutedText}"/>
+                        </Grid>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="图标大小" Style="{StaticResource FormLabelStyle}"/>
+                        <ComboBox Grid.Row="2" Grid.Column="1"
                                   x:Name="IconSizeComboBox"
                                   Style="{StaticResource FormControlStyle}"
                                   SelectionChanged="IconSizeComboBox_SelectionChanged">
@@ -180,8 +199,8 @@
                             <ComboBoxItem Content="大 (64×64)" Tag="Large"/>
                         </ComboBox>
 
-                        <TextBlock Grid.Row="2" Grid.Column="0" Text="文本大小" Style="{StaticResource FormLabelStyle}"/>
-                        <Grid Grid.Row="2" Grid.Column="1" Margin="0,4,0,4">
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="文本大小" Style="{StaticResource FormLabelStyle}"/>
+                        <Grid Grid.Row="3" Grid.Column="1" Margin="0,4,0,4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
@@ -196,44 +215,166 @@
                                        MinWidth="40"
                                        Style="{StaticResource AppMutedText}"/>
                         </Grid>
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="说明" Style="{StaticResource FormLabelStyle}"/>
+                        <TextBlock Grid.Row="4" Grid.Column="1"
+                                   Text="分区被激活或鼠标悬停时用「选中时透明度」，其余时间用「未选中时透明度」。"
+                                   Style="{StaticResource AppCaptionText}"
+                                   Margin="0,4,0,4"
+                                   TextWrapping="Wrap"/>
+                    </Grid>
+                </GroupBox>
+
+                <!-- 背景材质 -->
+                <GroupBox Header="背景材质">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="材质" Style="{StaticResource FormLabelStyle}"/>
+                        <ComboBox Grid.Row="0" Grid.Column="1"
+                                  x:Name="BackdropComboBox"
+                                  Style="{StaticResource FormControlStyle}"
+                                  SelectionChanged="BackdropComboBox_SelectionChanged">
+                            <ComboBoxItem Content="无" Tag="None"/>
+                            <ComboBoxItem Content="亚克力" Tag="Acrylic"/>
+                        </ComboBox>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="色调" Style="{StaticResource FormLabelStyle}"/>
+                        <Grid Grid.Row="1" Grid.Column="1" Margin="0,4,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <Border x:Name="TintPreview" Grid.Column="0" Style="{StaticResource ColorSwatchStyle}"/>
+
+                            <CheckBox x:Name="TintFollowTitleCheckBox"
+                                      Grid.Column="1"
+                                      Content="跟随标题栏"
+                                      VerticalAlignment="Center"
+                                      Margin="10,0,0,0"
+                                      Checked="TintFollowTitle_Changed"
+                                      Unchecked="TintFollowTitle_Changed"/>
+
+                            <Button x:Name="TintColorButton"
+                                    Grid.Column="2"
+                                    Content="选择颜色"
+                                    Style="{StaticResource AppGhostButton}"
+                                    HorizontalAlignment="Left"
+                                    Margin="10,0,0,0"
+                                    Click="TintColorButton_Click"/>
+                        </Grid>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="色调浓度" Style="{StaticResource FormLabelStyle}"/>
+                        <Grid Grid.Row="2" Grid.Column="1" Margin="0,4,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Slider x:Name="TintOpacitySlider"
+                                    Minimum="0" Maximum="1" Value="0.05"
+                                    TickFrequency="0.05" IsSnapToTickEnabled="True"
+                                    ValueChanged="TintOpacitySlider_ValueChanged"/>
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding ElementName=TintOpacitySlider, Path=Value, StringFormat={}{0:P0}}"
+                                       VerticalAlignment="Center" Margin="10,0,0,0"
+                                       MinWidth="40"
+                                       Style="{StaticResource AppMutedText}"/>
+                        </Grid>
                     </Grid>
                 </GroupBox>
 
                 <!-- 预览 -->
                 <GroupBox Header="预览">
-                    <Border x:Name="PreviewBorder"
-                            Height="160"
-                            CornerRadius="6"
-                            Background="#33FFFFFF"
-                            BorderBrush="{StaticResource AppBorderBrush}"
-                            BorderThickness="1">
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="*"/>
-                            </Grid.RowDefinitions>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
 
-                            <Border Grid.Row="0"
-                                    Background="{Binding ElementName=TitleBackgroundPreview, Path=Background}"
-                                    Height="32" Padding="12,0">
-                                <TextBlock Text="分区标题预览"
-                                           VerticalAlignment="Center"
-                                           Foreground="{Binding ElementName=TitleForegroundPreview, Path=Background}"
-                                           FontFamily="{Binding ElementName=TitleFontComboBox, Path=SelectedItem}"
-                                           FontSize="{Binding ElementName=TitleFontSizeSlider, Path=Value}"
-                                           HorizontalAlignment="{Binding ElementName=TitleAlignmentComboBox, Path=SelectedItem.Tag}"/>
+                        <StackPanel Grid.Column="0" Margin="0,0,6,0">
+                            <TextBlock Text="选中状态" Style="{StaticResource AppCaptionText}" Margin="0,0,0,6"/>
+                            <Border x:Name="PreviewBorder"
+                                    Height="140"
+                                    CornerRadius="6"
+                                    Background="#33FFFFFF"
+                                    BorderBrush="{StaticResource AppBorderBrush}"
+                                    BorderThickness="1">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+
+                                    <Border Grid.Row="0"
+                                            Background="{Binding ElementName=TitleBackgroundPreview, Path=Background}"
+                                            Height="32" Padding="12,0">
+                                        <TextBlock Text="分区标题预览"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{Binding ElementName=TitleForegroundPreview, Path=Background}"
+                                                   FontFamily="{Binding ElementName=TitleFontComboBox, Path=SelectedItem}"
+                                                   FontSize="{Binding ElementName=TitleFontSizeSlider, Path=Value}"
+                                                   HorizontalAlignment="{Binding ElementName=TitleAlignmentComboBox, Path=SelectedItem.Tag}"/>
+                                    </Border>
+
+                                    <WrapPanel Grid.Row="1" Margin="12" HorizontalAlignment="Center" VerticalAlignment="Top">
+                                        <Border Width="32" Height="32" Background="#FFCFD8E7" CornerRadius="4" Margin="6"
+                                                Visibility="{Binding ElementName=IconSizeComboBox, Path=SelectedItem.Tag, Converter={StaticResource EqualityToVisibilityConverter}, ConverterParameter=Small}"/>
+                                        <Border Width="48" Height="48" Background="#FFCFD8E7" CornerRadius="4" Margin="6"
+                                                Visibility="{Binding ElementName=IconSizeComboBox, Path=SelectedItem.Tag, Converter={StaticResource EqualityToVisibilityConverter}, ConverterParameter=Medium}"/>
+                                        <Border Width="64" Height="64" Background="#FFCFD8E7" CornerRadius="4" Margin="6"
+                                                Visibility="{Binding ElementName=IconSizeComboBox, Path=SelectedItem.Tag, Converter={StaticResource EqualityToVisibilityConverter}, ConverterParameter=Large}"/>
+                                    </WrapPanel>
+                                </Grid>
                             </Border>
+                        </StackPanel>
 
-                            <WrapPanel Grid.Row="1" Margin="12" HorizontalAlignment="Center" VerticalAlignment="Top">
-                                <Border Width="32" Height="32" Background="#FFCFD8E7" CornerRadius="4" Margin="6"
-                                        Visibility="{Binding ElementName=IconSizeComboBox, Path=SelectedItem.Tag, Converter={StaticResource EqualityToVisibilityConverter}, ConverterParameter=Small}"/>
-                                <Border Width="48" Height="48" Background="#FFCFD8E7" CornerRadius="4" Margin="6"
-                                        Visibility="{Binding ElementName=IconSizeComboBox, Path=SelectedItem.Tag, Converter={StaticResource EqualityToVisibilityConverter}, ConverterParameter=Medium}"/>
-                                <Border Width="64" Height="64" Background="#FFCFD8E7" CornerRadius="4" Margin="6"
-                                        Visibility="{Binding ElementName=IconSizeComboBox, Path=SelectedItem.Tag, Converter={StaticResource EqualityToVisibilityConverter}, ConverterParameter=Large}"/>
-                            </WrapPanel>
-                        </Grid>
-                    </Border>
+                        <StackPanel Grid.Column="1" Margin="6,0,0,0">
+                            <TextBlock Text="未选中状态" Style="{StaticResource AppCaptionText}" Margin="0,0,0,6"/>
+                            <Border x:Name="InactivePreviewBorder"
+                                    Height="140"
+                                    CornerRadius="6"
+                                    Background="#33FFFFFF"
+                                    BorderBrush="{StaticResource AppBorderBrush}"
+                                    BorderThickness="1">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+
+                                    <Border Grid.Row="0"
+                                            Background="{Binding ElementName=TitleBackgroundPreview, Path=Background}"
+                                            Height="32" Padding="12,0">
+                                        <TextBlock Text="分区标题预览"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{Binding ElementName=TitleForegroundPreview, Path=Background}"
+                                                   FontFamily="{Binding ElementName=TitleFontComboBox, Path=SelectedItem}"
+                                                   FontSize="{Binding ElementName=TitleFontSizeSlider, Path=Value}"
+                                                   HorizontalAlignment="{Binding ElementName=TitleAlignmentComboBox, Path=SelectedItem.Tag}"/>
+                                    </Border>
+
+                                    <WrapPanel Grid.Row="1" Margin="12" HorizontalAlignment="Center" VerticalAlignment="Top">
+                                        <Border Width="32" Height="32" Background="#FFCFD8E7" CornerRadius="4" Margin="6"
+                                                Visibility="{Binding ElementName=IconSizeComboBox, Path=SelectedItem.Tag, Converter={StaticResource EqualityToVisibilityConverter}, ConverterParameter=Small}"/>
+                                        <Border Width="48" Height="48" Background="#FFCFD8E7" CornerRadius="4" Margin="6"
+                                                Visibility="{Binding ElementName=IconSizeComboBox, Path=SelectedItem.Tag, Converter={StaticResource EqualityToVisibilityConverter}, ConverterParameter=Medium}"/>
+                                        <Border Width="64" Height="64" Background="#FFCFD8E7" CornerRadius="4" Margin="6"
+                                                Visibility="{Binding ElementName=IconSizeComboBox, Path=SelectedItem.Tag, Converter={StaticResource EqualityToVisibilityConverter}, ConverterParameter=Large}"/>
+                                    </WrapPanel>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </Grid>
                 </GroupBox>
             </StackPanel>
         </ScrollViewer>

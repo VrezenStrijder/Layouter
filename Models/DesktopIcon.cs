@@ -17,6 +17,7 @@ namespace Layouter.Models
         private double textSize = 12d;
         private bool isSelected;
         private bool isRenaming;
+        private bool isSearchHighlighted;
 
         public string Id 
         { 
@@ -142,6 +143,20 @@ namespace Layouter.Models
         {
             get => isRenaming;
             set => SetProperty(ref isRenaming, value);
+        }
+
+        /// <summary>
+        /// 是否处于搜索命中高亮状态
+        /// </summary>
+        /// <remarks>
+        /// 搜索定位到某个图标时会把该图标高亮出来，
+        /// 用户一眼就能看到搜索命中的是哪一个。
+        /// 与普通选中状态区分开，避免和用户手动选中的图标混淆。
+        /// </remarks>
+        public bool IsSearchHighlighted
+        {
+            get => isSearchHighlighted;
+            set => SetProperty(ref isSearchHighlighted, value);
         }
 
         public DesktopIcon()

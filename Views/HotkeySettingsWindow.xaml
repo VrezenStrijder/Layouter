@@ -1,0 +1,104 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Window x:Class="Layouter.Views.HotkeySettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        mc:Ignorable="d"
+        Title="快捷键设置"
+        Width="580" Height="480"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        FontFamily="Microsoft YaHei"
+        UseLayoutRounding="True"
+        PreviewKeyDown="Window_PreviewKeyDown">
+
+    <Grid Margin="24,20,24,18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0">
+            <TextBlock Text="快捷键"
+                       Style="{StaticResource AppPageTitleText}"/>
+            <TextBlock Text="点击右侧方框后直接按下组合键即可录制；留空表示不设置该快捷键"
+                       Style="{StaticResource AppCaptionText}"
+                       Margin="0,4,0,0"/>
+        </StackPanel>
+
+        <!-- 快捷键列表：每一行是一个功能的捕获区 -->
+        <ScrollViewer Grid.Row="1"
+                      Margin="0,16,0,0"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
+            <ItemsControl x:Name="HotkeyList">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Margin="0,0,0,14">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="210"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="{Binding DisplayName}"
+                                           FontSize="13.5"
+                                           Foreground="{StaticResource AppTextBrush}"/>
+                                <TextBlock Text="{Binding Description}"
+                                           FontSize="11.5"
+                                           Foreground="{StaticResource AppMutedTextBrush}"
+                                           Margin="0,3,0,0"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+
+                            <Border Grid.Column="1"
+                                    Tag="HotkeyCapture"
+                                    Height="40"
+                                    CornerRadius="6"
+                                    BorderThickness="1"
+                                    Background="{StaticResource AppSubtleSurfaceBrush}"
+                                    BorderBrush="{StaticResource AppBorderBrush}"
+                                    Focusable="True"
+                                    MouseDown="CaptureBox_MouseDown"
+                                    LostFocus="CaptureBox_LostFocus">
+                                <TextBlock Text="{Binding GestureText}"
+                                           FontSize="14"
+                                           Foreground="{StaticResource AppTextBrush}"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"/>
+                            </Border>
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+
+        <TextBlock x:Name="HintText"
+                   Grid.Row="2"
+                   Margin="0,10,0,0"
+                   FontSize="11.5"
+                   Foreground="{StaticResource AppMutedTextBrush}"
+                   TextWrapping="Wrap"
+                   Text="快捷键至少需要包含一个修饰键（Ctrl / Alt / Shift / Win），否则会与日常输入冲突。"/>
+
+        <Grid Grid.Row="3" Margin="0,16,0,0">
+            <Button Content="恢复默认"
+                    Style="{StaticResource AppGhostButton}"
+                    HorizontalAlignment="Left"
+                    Click="Reset_Click"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="取消"
+                        Style="{StaticResource AppGhostButton}"
+                        Margin="0,0,8,0"
+                        Click="Cancel_Click"/>
+                <Button Content="确定"
+                        Style="{StaticResource AppPrimaryButton}"
+                        Click="Confirm_Click"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

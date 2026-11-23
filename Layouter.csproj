@@ -6,15 +6,15 @@
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<UseWPF>true</UseWPF>
-		<AssemblyVersion>2.3.0.0</AssemblyVersion>
-		<FileVersion>2.3.0.0</FileVersion>
+		<AssemblyVersion>2.4.0.0</AssemblyVersion>
+		<FileVersion>2.4.0.0</FileVersion>
 		<ApplicationIcon>Resources\icon.ico</ApplicationIcon>
 
 		<Product>桌面助手(Layouter)</Product>
 		<Authors>@VrezenStrijder</Authors>
 		<Copyright>Copyright © 2026 @VrezenStrijder. All rights reserved.</Copyright>
 		<AssemblyTitle>Layouter</AssemblyTitle>
-		<Version>2.3.0</Version>
+		<Version>2.4.0</Version>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -108,10 +108,10 @@
 			<HintPath>libs\FluentIcons.Wpf.dll</HintPath>
 		</Reference>
 		<Reference Include="PluginEntry">
-		  <HintPath>libs\PluginEntry.dll</HintPath>
+			<HintPath>libs\PluginEntry.dll</HintPath>
 		</Reference>
 		<Reference Include="Win32">
-		  <HintPath>libs\Win32.dll</HintPath>
+			<HintPath>libs\Win32.dll</HintPath>
 		</Reference>
 	</ItemGroup>
 

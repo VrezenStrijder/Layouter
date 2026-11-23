@@ -86,11 +86,13 @@ namespace Layouter.Utility
 
                 var source = ShortCutUtil.GetSuitableIcon(filePath, size);
 
-                return source;
+                // 提取失败时给出占位图标，避免界面上出现「有名字却一片空白」的格子
+                return source ?? ShortCutUtil.GetDefaultIcon(size);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                return null;
+                Log.Information($"生成图标位图失败({filePath}): {ex.Message}");
+                return ShortCutUtil.GetDefaultIcon(ShortCutUtil.DefaultIconSize);
             }
         }
 

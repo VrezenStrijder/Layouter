@@ -15,11 +15,12 @@
         WindowStyle="None"
         Background="#20808080"
         BorderThickness="0"
-        Opacity="{Binding Opacity}"
+        Opacity="{Binding WindowOpacity}"
         AllowDrop="True"
         ResizeMode="CanResizeWithGrip"
         MouseEnter="Window_MouseEnter"
         MouseLeave="Window_MouseLeave"
+        DragLeave="DesktopManagerWindow_DragLeave"
         PreviewKeyDown="Window_PreviewKeyDown"
         ShowInTaskbar="False">
 
@@ -55,37 +56,6 @@
             </Setter>
         </Style>
 
-        <!-- 设置弹层中的菜单项 -->
-        <Style x:Key="PopupMenuItemStyle" TargetType="Button">
-            <Setter Property="Width" Value="140"/>
-            <Setter Property="Height" Value="32"/>
-            <Setter Property="Padding" Value="10,0"/>
-            <Setter Property="Margin" Value="2"/>
-            <Setter Property="HorizontalContentAlignment" Value="Left"/>
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="Border"
-                                Background="{TemplateBinding Background}"
-                                CornerRadius="5">
-                            <ContentPresenter HorizontalAlignment="Left"
-                                              VerticalAlignment="Center"
-                                              Margin="{TemplateBinding Padding}"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Border" Property="Background" Value="{StaticResource AppAccentSoftBrush}"/>
-                                <Setter Property="Foreground" Value="{StaticResource AppAccentBrush}"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
         <ContextMenu x:Key="PartitionContextMenu">
             <MenuItem Header="自动排列图标" Click="AutoArrange_Click"/>
             <MenuItem Header="对齐所有分区" Click="AlignPartitions_Click"/>
@@ -100,12 +70,24 @@
     </Window.Resources>
 
     <Grid>
+        <!-- 命中层：开启背景材质后窗口背景是全透明的，
+             而全透明像素不参与系统命中测试，会让整个分区收不到点击和拖放（表现为"分区像死了一样"）。
+             这里铺一层 alpha=1 的近乎不可见底色，保证整块区域都能交互。 -->
+        <Border x:Name="HitLayer" Background="#01000000" CornerRadius="8"/>
+
         <Border x:Name="MainBorder" CornerRadius="8" BorderThickness="0">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*" x:Name="IconsRowDefinition"/>
                 </Grid.RowDefinitions>
+
+                <!-- 色调叠加层：亚克力 / 云母的色调由这一层叠出来 -->
+                <Border x:Name="TintLayer"
+                        Grid.Row="0" Grid.RowSpan="2"
+                        Background="{Binding TintBrush}"
+                        CornerRadius="8"
+                        IsHitTestVisible="False"/>
 
                 <!-- 分区标题栏 -->
                 <Border Grid.Row="0" Background="{Binding TitleBackground}" CornerRadius="8,8,0,0" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown" MouseLeftButtonUp="TitleBar_MouseLeftButtonUp" >
@@ -197,24 +179,6 @@
                                     <FluentIcons:SymbolIcon Symbol="Settings" FontSize="16" Foreground="{Binding TitleForeground}" />
                                 </Button>
                             </StackPanel>
-
-                            <!-- 设置菜单 -->
-                            <Popup x:Name="SettingsPopup" StaysOpen="False" PlacementTarget="{Binding ElementName=SettingsButton}" Placement="Bottom" AllowsTransparency="True">
-                                <Border Background="{StaticResource AppSurfaceBrush}"
-                                        BorderBrush="{StaticResource AppBorderBrush}"
-                                        BorderThickness="1"
-                                        CornerRadius="{StaticResource AppCornerRadius}"
-                                        Padding="3"
-                                        Margin="0,4,0,0">
-                                    <StackPanel>
-                                        <Button Content="分区设置" Click="PartitionSettings_Click" Style="{StaticResource PopupMenuItemStyle}"/>
-                                        <Button Content="删除分区" Click="DeletePartition_Click" Style="{StaticResource PopupMenuItemStyle}"/>
-                                        <Separator/>
-                                        <Button Content="对齐图标" Click="AutoArrange_Click" Style="{StaticResource PopupMenuItemStyle}"/>
-                                        <Button Content="对齐分区" Click="AlignPartitions_Click" Style="{StaticResource PopupMenuItemStyle}"/>
-                                    </StackPanel>
-                                </Border>
-                            </Popup>
                         </Grid>
                     </Grid>
                 </Border>
@@ -223,14 +187,11 @@
                 <Border x:Name="IconsContainer" Grid.Row="1" Background="{Binding ContentBackground}" CornerRadius="0,0,8,0">
                     <Grid>
                         <!-- 网格视图：图标排成方阵，数量过多时通过垂直滚动条查看 -->
-                        <!-- Height 绑定 IconsViewHeight：可见高度按整行收敛，
-                             避免最后一行只露出一半；多出来的空间留在分区底部（背景透明，看不出来） -->
+                        <!-- 滚动容器直接铺满图标区，滚动条轨道才会完整显示，能一路拖到底 -->
                         <ScrollViewer x:Name="IconsScrollViewer"
                                       Background="{Binding BackgroundColor}"
                                       VerticalScrollBarVisibility="Auto"
                                       HorizontalScrollBarVisibility="Hidden"
-                                      VerticalAlignment="Top"
-                                      Height="{Binding IconsViewHeight}"
                                       Visibility="{Binding IsGridView, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <ItemsControl ItemsSource="{Binding Icons}" Margin="5,5,5,5"
                      AllowDrop="True" Background="Transparent"
@@ -272,6 +233,8 @@
                                         <Style TargetType="Border">
                                             <Setter Property="Background" Value="Transparent"/>
                                             <Setter Property="Cursor" Value="Arrow"/>
+                                            <Setter Property="BorderThickness" Value="1"/>
+                                            <Setter Property="BorderBrush" Value="Transparent"/>
                                             <Style.Triggers>
                                                 <Trigger Property="IsMouseOver" Value="True">
                                                     <Setter Property="Background" Value="#1FFFFFFF"/>
@@ -279,6 +242,11 @@
                                                 </Trigger>
                                                 <DataTrigger Binding="{Binding IsSelected}" Value="True">
                                                     <Setter Property="Background" Value="#33FFFFFF"/>
+                                                </DataTrigger>
+                                                <!-- 搜索命中高亮：全局搜索定位到的图标用强调色框出来 -->
+                                                <DataTrigger Binding="{Binding IsSearchHighlighted}" Value="True">
+                                                    <Setter Property="Background" Value="#592563EB"/>
+                                                    <Setter Property="BorderBrush" Value="#FF2563EB"/>
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
@@ -299,7 +267,10 @@
                                                 </Image.Source>
                                             </Image>
                                             <!-- 文件名称：过长时自动截断，完整名称通过 Tooltip 查看 -->
+                                            <!-- 点击名称文字会打上标记，选中图标后再点名称即可进入重命名 -->
                                             <TextBlock Text="{Binding DisplayName}"
+                                                       Tag="IconNameArea"
+                                                       MouseLeftButtonUp="IconName_MouseUp"
                                                        ToolTip="{Binding Name}"
                                                        TextWrapping="Wrap"
                                                        TextTrimming="CharacterEllipsis"
@@ -365,8 +336,6 @@
                                       Background="{Binding BackgroundColor}"
                                       VerticalScrollBarVisibility="Auto"
                                       HorizontalScrollBarVisibility="Disabled"
-                                      VerticalAlignment="Top"
-                                      Height="{Binding IconsViewHeight}"
                                       Visibility="{Binding IsListView, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <ItemsControl ItemsSource="{Binding Icons}" Margin="5,5,5,5"
                              AllowDrop="True" Background="Transparent"
@@ -396,6 +365,8 @@
                                                 <Style TargetType="Border">
                                                     <Setter Property="Background" Value="Transparent"/>
                                                     <Setter Property="Cursor" Value="Arrow"/>
+                                                    <Setter Property="BorderThickness" Value="1"/>
+                                                    <Setter Property="BorderBrush" Value="Transparent"/>
                                                     <Style.Triggers>
                                                         <Trigger Property="IsMouseOver" Value="True">
                                                             <Setter Property="Background" Value="#1FFFFFFF"/>
@@ -403,6 +374,11 @@
                                                         </Trigger>
                                                         <DataTrigger Binding="{Binding IsSelected}" Value="True">
                                                             <Setter Property="Background" Value="#33FFFFFF"/>
+                                                        </DataTrigger>
+                                                        <!-- 搜索命中高亮：全局搜索定位到的图标用强调色框出来 -->
+                                                        <DataTrigger Binding="{Binding IsSearchHighlighted}" Value="True">
+                                                            <Setter Property="Background" Value="#592563EB"/>
+                                                            <Setter Property="BorderBrush" Value="#FF2563EB"/>
                                                         </DataTrigger>
                                                     </Style.Triggers>
                                                 </Style>
@@ -500,6 +476,30 @@
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
                         </ScrollViewer>
+
+                        <!-- 插入位置标识层：拖动排序时高亮「松手后图标会落在哪一格」 -->
+                        <!-- 放在滚动容器之外，位置由代码换算（已包含滚动位移），
+                             这样标识既能跟随内容滚动，又不会拦截鼠标事件影响拖放 -->
+                        <Canvas x:Name="InsertionIndicatorLayer"
+                                IsHitTestVisible="False"
+                                Visibility="Collapsed">
+                            <Border x:Name="InsertionIndicator"
+                                    CornerRadius="6"
+                                    BorderThickness="2"
+                                    BorderBrush="{StaticResource AppAccentBrush}">
+                                <!-- 半透明填充：既能在任意壁纸上看清落点，又不会挡住下方的图标 -->
+                                <Border.Background>
+                                    <SolidColorBrush Color="{StaticResource ColorAccent}" Opacity="0.20"/>
+                                </Border.Background>
+                                <Border.Effect>
+                                    <DropShadowEffect Color="{StaticResource ColorAccent}"
+                                                      BlurRadius="10"
+                                                      ShadowDepth="0"
+                                                      Opacity="0.9"
+                                                      RenderingBias="Quality"/>
+                                </Border.Effect>
+                            </Border>
+                        </Canvas>
                     </Grid>
 
                 </Border>

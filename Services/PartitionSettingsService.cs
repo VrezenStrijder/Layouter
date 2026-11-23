@@ -31,6 +31,22 @@ namespace Layouter.Services
             globalStyleFilePath = Path.Combine(appDataPath, "partitionStyle_global.json");
         }
 
+        /// <summary>
+        /// 序列化设置时使用的参数
+        /// </summary>
+        /// <remarks>
+        /// 未设置的字段不写入配置文件，避免配置文件里堆出一堆 null。
+        /// </remarks>
+        private static JsonSerializerSettings BuildSerializerSettings()
+        {
+            return new JsonSerializerSettings
+            {
+                Formatting = Formatting.Indented,
+                Converters = new List<JsonConverter> { new StringEnumConverter() },
+                NullValueHandling = NullValueHandling.Ignore
+            };
+        }
+
         public void SaveGlobalSettings(DesktopManagerViewModel viewModel)
         {
             try
@@ -43,13 +59,16 @@ namespace Layouter.Services
                     TitleFontSize = viewModel.TitleFontSize,
                     TitleAlignment = viewModel.TitleAlignment,
                     Opacity = viewModel.Opacity,
+                    InactiveOpacity = viewModel.InactiveOpacity,
+                    Backdrop = viewModel.Backdrop,
+                    TintOpacity = viewModel.TintOpacity,
+                    TintColorOverride = viewModel.TintColorOverride,
                     IconSize = viewModel.IconSize,
                     IconTextSize = viewModel.IconTextSize,
                     IsLocked = viewModel.IsLocked
                 };
 
-                string json = JsonConvert.SerializeObject(settings, Formatting.Indented,
-                    new JsonConverter[] { new StringEnumConverter() });
+                string json = JsonConvert.SerializeObject(settings, BuildSerializerSettings());
 
                 File.WriteAllText(globalStyleFilePath, json);
                 Log.Information("已保存全局样式配置");
@@ -94,6 +113,10 @@ namespace Layouter.Services
                     TitleFontSize = viewModel.TitleFontSize,
                     TitleAlignment = viewModel.TitleAlignment,
                     Opacity = viewModel.Opacity,
+                    InactiveOpacity = viewModel.InactiveOpacity,
+                    Backdrop = viewModel.Backdrop,
+                    TintOpacity = viewModel.TintOpacity,
+                    TintColorOverride = viewModel.TintColorOverride,
                     IconSize = viewModel.IconSize,
                     IconTextSize = viewModel.IconTextSize,
                     IsLocked = viewModel.IsLocked,
@@ -101,8 +124,7 @@ namespace Layouter.Services
                 };
 
                 // 保存所有窗口配置
-                string json = JsonConvert.SerializeObject(allSettings, Formatting.Indented,
-                    new JsonConverter[] { new StringEnumConverter() });
+                string json = JsonConvert.SerializeObject(allSettings, BuildSerializerSettings());
 
                 File.WriteAllText(styleFilePath, json);
                 Log.Information($"已保存窗口 {id} 的样式配置");
@@ -129,6 +151,7 @@ namespace Layouter.Services
                         TitleFontSize = defaultSettings.TitleFontSize,
                         TitleAlignment = defaultSettings.TitleAlignment,
                         Opacity = defaultSettings.Opacity,
+                        InactiveOpacity = defaultSettings.InactiveOpacity ?? defaultSettings.Opacity * 0.7,
                         IconSize = defaultSettings.IconSize,
                         IconTextSize = defaultSettings.IconTextSize,
                         IsLocked = defaultSettings.IsLocked,
@@ -237,6 +260,10 @@ namespace Layouter.Services
                 viewModel.TitleAlignment = settings.TitleAlignment;
                 viewModel.TitleFontSize = settings.TitleFontSize;
                 viewModel.Opacity = settings.Opacity;
+                viewModel.InactiveOpacity = ResolveInactiveOpacity(settings);
+                viewModel.Backdrop = settings.Backdrop;
+                viewModel.TintOpacity = settings.TintOpacity;
+                viewModel.TintColorOverride = settings.TintColorOverride;
                 viewModel.IconSize = settings.IconSize;
                 viewModel.IconTextSize = settings.IconTextSize;
                 viewModel.IsLocked = settings.IsLocked;
@@ -270,11 +297,32 @@ namespace Layouter.Services
             viewModel.TitleAlignment = settings.TitleAlignment;
             viewModel.TitleFontSize = settings.TitleFontSize;
             viewModel.Opacity = settings.Opacity;
+            viewModel.InactiveOpacity = ResolveInactiveOpacity(settings);
+            viewModel.Backdrop = settings.Backdrop;
+            viewModel.TintOpacity = settings.TintOpacity;
+            viewModel.TintColorOverride = settings.TintColorOverride;
             viewModel.IconSize = settings.IconSize;
             viewModel.IconTextSize = settings.IconTextSize;
             viewModel.IsLocked = settings.IsLocked;
 
             return viewModel;
+        }
+
+        /// <summary>
+        /// 计算未选中状态下的透明度
+        /// </summary>
+        /// <remarks>
+        /// 旧配置文件里没有这个字段，那时未选中状态固定是选中状态的 0.7 倍，
+        /// 这里保持同样的结果，升级后外观不会突变。
+        /// </remarks>
+        private static double ResolveInactiveOpacity(PartitionSettings settings)
+        {
+            if (settings == null)
+            {
+                return 0.63;
+            }
+
+            return settings.InactiveOpacity ?? settings.Opacity * 0.7;
         }
 
 

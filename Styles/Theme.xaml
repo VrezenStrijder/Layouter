@@ -72,6 +72,15 @@
     <SolidColorBrush x:Key="AppSelectedBrush" Color="{StaticResource ColorSelected}"/>
     <SolidColorBrush x:Key="AppHeaderBrush" Color="{StaticResource ColorHeaderBackground}"/>
 
+    <!--
+        ==================== 半透明表面 ====================
+        浮层类窗口（全局搜索等）使用半透明底色，
+        让下层桌面内容隐约透出，同时保持文字对比度足够清晰。
+    -->
+    <SolidColorBrush x:Key="AppSurfaceTranslucentBrush" Color="#E0FFFFFF"/>
+    <SolidColorBrush x:Key="AppSurfaceTranslucentSubtleBrush" Color="#B8F8FAFC"/>
+    <SolidColorBrush x:Key="AppBorderTranslucentBrush" Color="#73D8DEE9"/>
+
     <!-- ==================== 字体 ==================== -->
     <FontFamily x:Key="AppFontFamily">Microsoft YaHei UI</FontFamily>
     <FontFamily x:Key="AppMonoFontFamily">Consolas</FontFamily>

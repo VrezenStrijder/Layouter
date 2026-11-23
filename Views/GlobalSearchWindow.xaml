@@ -1,0 +1,267 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Window x:Class="Layouter.Views.GlobalSearchWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:vm="clr-namespace:Layouter.ViewModels"
+        xmlns:FluentIcons="clr-namespace:FluentIcons.Wpf;assembly=FluentIcons.Wpf"
+        mc:Ignorable="d"
+        Title="全局搜索"
+        Width="680" Height="560"
+        MinWidth="520" MinHeight="360"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        Topmost="True"
+        ResizeMode="CanResize"
+        FontFamily="Microsoft YaHei"
+        UseLayoutRounding="True"
+        PreviewKeyDown="GlobalSearchWindow_PreviewKeyDown">
+
+    <Border Margin="20"
+            Background="{StaticResource AppSurfaceTranslucentBrush}"
+            BorderBrush="{StaticResource AppBorderTranslucentBrush}"
+            BorderThickness="1"
+            CornerRadius="12">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="28" ShadowDepth="6" Opacity="0.35" RenderingBias="Quality"/>
+        </Border.Effect>
+
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- ============ 搜索输入区 ============ -->
+            <Border Grid.Row="0"
+                    BorderBrush="{StaticResource AppBorderTranslucentBrush}"
+                    BorderThickness="0,0,0,1"
+                    Padding="18,14">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <FluentIcons:SymbolIcon Grid.Column="0"
+                                            Symbol="Search"
+                                            FontSize="18"
+                                            Foreground="{StaticResource AppMutedTextBrush}"
+                                            VerticalAlignment="Center"
+                                            Margin="0,0,10,0"/>
+
+                    <TextBox x:Name="SearchBox"
+                             Grid.Column="1"
+                             Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}"
+                             FontSize="15"
+                             MinHeight="38"
+                             Padding="12,7"
+                             VerticalContentAlignment="Center"
+                             BorderBrush="{StaticResource AppBorderTranslucentBrush}"
+                             Background="{StaticResource AppSurfaceTranslucentBrush}"
+                             Foreground="{StaticResource AppTextBrush}"/>
+
+                    <!-- 搜索设置 -->
+                    <Button Grid.Column="2"
+                            Style="{StaticResource AppIconButton}"
+                            Width="32" Height="32"
+                            Margin="10,0,0,0"
+                            VerticalAlignment="Center"
+                            ToolTip="搜索设置"
+                            Click="SearchSettings_Click">
+                        <FluentIcons:SymbolIcon Symbol="Settings" FontSize="15"/>
+                    </Button>
+                </Grid>
+            </Border>
+
+            <!-- ============ 建议（结果）区 ============ -->
+            <Grid Grid.Row="1">
+                <ListBox x:Name="ResultsList"
+                         ItemsSource="{Binding Results}"
+                         SelectedItem="{Binding SelectedResult}"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         Padding="8,6"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         HorizontalContentAlignment="Stretch"
+                         MouseDoubleClick="ResultsList_MouseDoubleClick">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel>
+                                <!-- ===== 分区区块小标题（该分区第一条时显示） ===== -->
+                                <Border Visibility="{Binding IsPartitionGroupStart, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                        Margin="4,8,4,4"
+                                        Padding="8,4"
+                                        CornerRadius="5"
+                                        Background="{StaticResource AppSurfaceTranslucentSubtleBrush}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <FluentIcons:SymbolIcon Symbol="Grid"
+                                                                FontSize="12"
+                                                                Foreground="{StaticResource AppAccentBrush}"
+                                                                VerticalAlignment="Center"
+                                                                Margin="0,0,6,0"/>
+                                        <TextBlock Text="{Binding GroupTitle}"
+                                                   FontSize="12"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{StaticResource AppTextSecondaryBrush}"
+                                                   VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- ===== 文件系统区块标题（用分隔线与上方区分区块） ===== -->
+                                <Border Visibility="{Binding IsFileSystemGroupStart, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                        Margin="4,14,4,4"
+                                        Padding="8,8,8,6"
+                                        BorderBrush="{StaticResource AppBorderTranslucentBrush}"
+                                        BorderThickness="0,1,0,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <FluentIcons:SymbolIcon Symbol="Globe"
+                                                                FontSize="13"
+                                                                Foreground="{StaticResource AppAccentBrush}"
+                                                                VerticalAlignment="Center"
+                                                                Margin="0,0,6,0"/>
+                                        <TextBlock Text="文件系统"
+                                                   FontSize="12"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{StaticResource AppTextSecondaryBrush}"
+                                                   VerticalAlignment="Center"/>
+                                        <TextBlock Text="整个磁盘 · 点击右侧可添加到分区"
+                                                   FontSize="11"
+                                                   Foreground="{StaticResource AppMutedTextBrush}"
+                                                   VerticalAlignment="Center"
+                                                   Margin="8,0,0,0"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- ===== 结果行 ===== -->
+                                <Grid Margin="2,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="34"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <!-- 图标 -->
+                                    <Border Grid.Column="0" Width="26" Height="26"
+                                            CornerRadius="5"
+                                            Background="{StaticResource AppSurfaceTranslucentSubtleBrush}"
+                                            VerticalAlignment="Center">
+                                        <Image Source="{Binding IconImage}"
+                                               Width="18" Height="18"
+                                               Stretch="Uniform"
+                                               RenderOptions.BitmapScalingMode="HighQuality"/>
+                                    </Border>
+
+                                    <!-- 名称 + 路径 -->
+                                    <StackPanel Grid.Column="1" Margin="6,0,8,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding DisplayName}"
+                                                   FontSize="13.5"
+                                                   Foreground="{StaticResource AppTextBrush}"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding DisplayPath}"
+                                                   FontSize="11.5"
+                                                   Foreground="{StaticResource AppMutedTextBrush}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Margin="0,2,0,0"/>
+                                    </StackPanel>
+
+                                    <!-- 操作按钮区（图标按钮） -->
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <!-- 定位（仅分区图标结果） -->
+                                        <Button Style="{StaticResource AppIconButton}"
+                                                Width="28" Height="28"
+                                                ToolTip="定位到分区中的图标"
+                                                Visibility="{Binding CanLocate, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                Click="LocateResult_Click">
+                                            <FluentIcons:SymbolIcon Symbol="MyLocation" FontSize="15"/>
+                                        </Button>
+
+                                        <!-- 添加到分区（仅文件系统结果，与定位互斥） -->
+                                        <Button Style="{StaticResource AppIconButton}"
+                                                Width="28" Height="28"
+                                                ToolTip="添加到分区"
+                                                Visibility="{Binding CanAddToPartition, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                Click="AddToPartition_Click">
+                                            <FluentIcons:SymbolIcon Symbol="FolderAdd" FontSize="15"/>
+                                        </Button>
+
+                                        <!-- 打开 -->
+                                        <Button Style="{StaticResource AppIconButton}"
+                                                Width="28" Height="28"
+                                                ToolTip="打开"
+                                                Click="OpenResult_Click">
+                                            <FluentIcons:SymbolIcon Symbol="Open" FontSize="15"/>
+                                        </Button>
+
+                                        <!-- 以管理员身份运行 -->
+                                        <Button Style="{StaticResource AppIconButton}"
+                                                Width="28" Height="28"
+                                                ToolTip="以管理员身份运行"
+                                                Visibility="{Binding CanRunAsAdmin, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                Click="RunAsAdmin_Click">
+                                            <FluentIcons:SymbolIcon Symbol="Shield" FontSize="15"/>
+                                        </Button>
+
+                                        <!-- 打开所在目录 -->
+                                        <Button Style="{StaticResource AppIconButton}"
+                                                Width="28" Height="28"
+                                                ToolTip="打开所在目录"
+                                                Visibility="{Binding CanOpenFolder, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                Click="OpenFolder_Click">
+                                            <FluentIcons:SymbolIcon Symbol="FolderOpen" FontSize="15"/>
+                                        </Button>
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+
+                <!-- 空状态提示 -->
+                <StackPanel HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Visibility="{Binding Results.Count, Converter={StaticResource EqualityToVisibilityConverter}, ConverterParameter=0}">
+                    <FluentIcons:SymbolIcon Symbol="Search"
+                                            FontSize="34"
+                                            Foreground="{StaticResource AppMutedTextBrush}"
+                                            HorizontalAlignment="Center"/>
+                    <TextBlock Text="输入名称或拼音查找分区中的图标"
+                               FontSize="13"
+                               Foreground="{StaticResource AppMutedTextBrush}"
+                               Margin="0,12,0,0"
+                               HorizontalAlignment="Center"/>
+                    <TextBlock Text="支持中文、英文与汉语拼音（如 wx / weixin）"
+                               FontSize="11.5"
+                               Foreground="{StaticResource AppMutedTextBrush}"
+                               Margin="0,4,0,0"
+                               HorizontalAlignment="Center"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- ============ 底部提示 ============ -->
+            <Border Grid.Row="2"
+                    BorderBrush="{StaticResource AppBorderTranslucentBrush}"
+                    BorderThickness="0,1,0,0"
+                    Padding="18,10">
+                <Grid>
+                    <TextBlock Text="{Binding StatusText}"
+                               FontSize="12"
+                               Foreground="{StaticResource AppTextSecondaryBrush}"
+                               VerticalAlignment="Center"/>
+                    <TextBlock Text="Enter 定位 · Ctrl+Enter 打开 · ↑↓ 选择 · Esc 关闭"
+                               FontSize="11.5"
+                               Foreground="{StaticResource AppMutedTextBrush}"
+                               HorizontalAlignment="Right"
+                               VerticalAlignment="Center"/>
+                </Grid>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

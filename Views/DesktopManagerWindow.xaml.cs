@@ -29,7 +29,6 @@ namespace Layouter.Views
         private DesktopIcon draggedIcon = null;
         private bool isMouseOver = false;
         private bool isResizing = false; // 是否正在调整大小
-        private double originalOpacity = 1.0; //窗口默认透明度
         private bool isAdjustingSize = false; // 是否正在调整窗口大小
         private bool isSnapPending = false;
         private DateTime lastSizeSnapTime = DateTime.MinValue;
@@ -38,6 +37,24 @@ namespace Layouter.Views
         private DateTime lastClickTime = DateTime.MinValue;
         private DesktopIcon lastClickedIcon = null;
         private const double DoubleClickTimeThreshold = 500; //毫秒
+
+        /// <summary>
+        /// 未启用背景材质时的窗口底色
+        /// </summary>
+        /// <remarks>
+        /// 与 XAML 中原本的 <c>Background="#20808080"</c> 保持一致，
+        /// 关闭材质时用它还原。
+        /// </remarks>
+        private static readonly Brush DefaultWindowBackground =
+            new SolidColorBrush(Color.FromArgb(0x20, 0x80, 0x80, 0x80));
+
+        /// <summary>
+        /// 本次点击是否落在图标名称文字上
+        /// </summary>
+        /// <remarks>
+        /// 由名称文字的抬起事件写入，图标项统一处理选中与重命名时消费。
+        /// </remarks>
+        private bool clickedOnIconName;
 
         // 图标选中与重命名
         private DesktopIcon selectedIcon = null;
@@ -52,6 +69,9 @@ namespace Layouter.Views
         private bool isRolledUp = false;
         // 标题栏高度
         private const double TitleBarHeight = 30;
+
+        // 落点换算的容差（像素），消除浮点误差导致的边界少算一行/一列
+        private const double LayoutTolerance = 0.05;
 
         public DesktopManagerWindow()
         {
@@ -124,6 +144,15 @@ namespace Layouter.Views
         /// </remarks>
         public bool IsInteracting => isResizing;
 
+        /// <summary>
+        /// 分区数据是否已经载入
+        /// </summary>
+        /// <remarks>
+        /// 由 <see cref="PartitionDataService"/> 在读入配置后置位，
+        /// 避免窗口显示时把同一份配置再读一遍。
+        /// </remarks>
+        public bool IsPartitionDataLoaded { get; internal set; }
+
         #region 分区窗口事件
 
         private void DesktopManagerWindow_Loaded(object sender, RoutedEventArgs e)
@@ -173,8 +202,261 @@ namespace Layouter.Views
                 e.Effects = DragDropEffects.None;
             }
 
+            // 同一分区内拖动图标时，按落点实时预览新位置：
+            // 其余图标随鼠标逐格让位，松手即完成换位，跨行拖动同样有效。
+            PreviewIconReorder(e);
+
             e.Handled = true;
         }
+
+        /// <summary>
+        /// 同一分区内拖动图标时的实时换位预览
+        /// </summary>
+        private void PreviewIconReorder(DragEventArgs e)
+        {
+            try
+            {
+                // 每次经过都重新算一次标识位置；
+                // 条件不满足时保持隐藏，避免残留上一次拖动的标识
+                HideInsertionIndicator();
+
+                if (e?.Data == null || !e.Data.GetDataPresent("DraggedIconSource"))
+                {
+                    return;
+                }
+
+                if (!string.Equals(e.Data.GetData("DraggedIconSource")?.ToString(), "Partition", StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                if (!e.Data.GetDataPresent("IconId"))
+                {
+                    return;
+                }
+
+                // 只有从本分区拖出的图标才能在本分区内实时预览
+                if (e.Data.GetDataPresent("SourceWindowHandle")
+                    && e.Data.GetData("SourceWindowHandle") is IntPtr sourceHandle
+                    && sourceHandle != new WindowInteropHelper(this).Handle)
+                {
+                    return;
+                }
+
+                var viewModel = this.DataContext as DesktopManagerViewModel;
+                if (viewModel == null || viewModel.Icons.Count == 0)
+                {
+                    return;
+                }
+
+                string iconId = e.Data.GetData("IconId")?.ToString();
+                var icon = viewModel.Icons.FirstOrDefault(i => string.Equals(i.Id, iconId, StringComparison.Ordinal));
+                if (icon == null)
+                {
+                    return;
+                }
+
+                Win32.POINT cursor;
+                if (!Win32.GetCursorPos(out cursor))
+                {
+                    return;
+                }
+
+                Point contentPoint = GetIconContainerPoint(new Point(cursor.X, cursor.Y));
+
+                // 光标不在图标区域内时不做预览，避免只是掠过标题栏就把图标挪到最前面
+                if (contentPoint.X < 0 || contentPoint.Y < 0)
+                {
+                    return;
+                }
+
+                int currentIndex = viewModel.Icons.IndexOf(icon);
+                if (currentIndex < 0)
+                {
+                    return;
+                }
+
+                int targetIndex = viewModel.IsListView
+                    ? GetTargetIndexInList(viewModel, contentPoint)
+                    : GetTargetIndexByPoint(viewModel, contentPoint);
+
+                MoveIconToIndex(viewModel, icon, currentIndex, targetIndex);
+
+                // 用高亮框标出「松手后图标会落在哪一格」
+                ShowInsertionIndicator(viewModel, targetIndex, new Point(cursor.X, cursor.Y));
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"实时预览图标位置失败: {ex.Message}");
+            }
+        }
+
+        #region 插入位置标识
+
+        /// <summary>
+        /// 图标项边框的内边距（与 XAML 中 IconHighlight 的 Padding 保持一致）
+        /// </summary>
+        /// <remarks>
+        /// 标识框要正好罩住整个图标项（含边框留白），
+        /// 否则会出现「框比图标小一圈」的错位观感。
+        /// </remarks>
+        private const double IconItemPadding = 4;
+
+        /// <summary>
+        /// 显示拖动排序时的插入位置标识
+        /// </summary>
+        /// <param name="viewModel">分区视图模型</param>
+        /// <param name="targetIndex">松手后图标将占据的序号</param>
+        /// <param name="screenPoint">当前光标的屏幕坐标</param>
+        private void ShowInsertionIndicator(DesktopManagerViewModel viewModel, int targetIndex, Point screenPoint)
+        {
+            if (viewModel == null || targetIndex < 0 || InsertionIndicatorLayer == null || InsertionIndicator == null)
+            {
+                HideInsertionIndicator();
+                return;
+            }
+
+            try
+            {
+                bool isListView = viewModel.IsListView;
+                FrameworkElement host = isListView ? iconsListContainer : iconsContainer;
+
+                if (host == null || !host.IsVisible || host.ActualWidth <= 0)
+                {
+                    HideInsertionIndicator();
+                    return;
+                }
+
+                // 标识必须画在可见范围内：
+                // 光标不在图标区时直接隐藏，避免标识跑到滚动区外、甚至压到标题栏上
+                if (!IsCursorOverIconsArea(screenPoint, isListView))
+                {
+                    HideInsertionIndicator();
+                    return;
+                }
+
+                double left;
+                double top;
+                double width;
+                double height;
+
+                if (isListView)
+                {
+                    // 列表视图：一行一条，标识画成一条横杠
+                    double rowHeight = DesktopManagerViewModel.ListRowHeight;
+                    left = 0;
+                    top = targetIndex * rowHeight + 2;
+                    width = host.ActualWidth;
+                    height = Math.Max(4, rowHeight - 4);
+                }
+                else
+                {
+                    // 网格视图：标识整个目标格子
+                    int columns = Math.Max(1, viewModel.IconColumnCount);
+                    int row = targetIndex / columns;
+                    int column = targetIndex % columns;
+                    Size cell = viewModel.GetIconCellSize();
+
+                    left = DesktopManagerViewModel.IconSpacing + column * viewModel.GridColumnPitch;
+                    top = DesktopManagerViewModel.IconSpacing + row * viewModel.GridRowPitch;
+                    width = cell.Width + IconItemPadding;
+                    height = cell.Height;
+                }
+
+                // 换算到标识层的坐标系：
+                // TranslatePoint 会把滚动位移一并算进去，
+                // 因此分区滚动后标识依然落在正确的格子上。
+                Point origin = host.TranslatePoint(new Point(0, 0), InsertionIndicatorLayer);
+                if (double.IsNaN(origin.X) || double.IsNaN(origin.Y)
+                    || double.IsInfinity(origin.X) || double.IsInfinity(origin.Y))
+                {
+                    HideInsertionIndicator();
+                    return;
+                }
+
+                InsertionIndicator.Width = width;
+                InsertionIndicator.Height = height;
+                Canvas.SetLeft(InsertionIndicator, origin.X + left);
+                Canvas.SetTop(InsertionIndicator, origin.Y + top);
+                InsertionIndicatorLayer.Visibility = Visibility.Visible;
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"显示插入位置标识失败: {ex.Message}");
+                HideInsertionIndicator();
+            }
+        }
+
+        /// <summary>
+        /// 隐藏插入位置标识
+        /// </summary>
+        private void HideInsertionIndicator()
+        {
+            if (InsertionIndicatorLayer != null && InsertionIndicatorLayer.Visibility != Visibility.Collapsed)
+            {
+                InsertionIndicatorLayer.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        /// <summary>
+        /// 判断光标是否落在图标区的可见范围内
+        /// </summary>
+        private bool IsCursorOverIconsArea(Point screenPoint, bool isListView)
+        {
+            try
+            {
+                ScrollViewer scroller = isListView ? IconsListScrollViewer : IconsScrollViewer;
+                if (scroller == null || !scroller.IsVisible || scroller.ViewportHeight <= 0)
+                {
+                    return false;
+                }
+
+                Point cursorInWindow = PointFromScreen(screenPoint);
+                Rect viewport = scroller.TransformToAncestor(this)
+                    .TransformBounds(new Rect(0, 0, scroller.ViewportWidth, scroller.ViewportHeight));
+
+                return viewport.Contains(cursorInWindow);
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"判断光标是否在图标区内出错: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 拖动离开分区窗口时隐藏插入位置标识
+        /// </summary>
+        /// <remarks>
+        /// DragLeave 会沿可视树冒泡，鼠标只是从标题栏扫过图标区也会触发，
+        /// 这里用光标的真实位置判断：只有真的离开了窗口才隐藏。
+        /// </remarks>
+        private void DesktopManagerWindow_DragLeave(object sender, DragEventArgs e)
+        {
+            try
+            {
+                Win32.POINT cursor;
+                if (!Win32.GetCursorPos(out cursor))
+                {
+                    HideInsertionIndicator();
+                    return;
+                }
+
+                Point point = PointFromScreen(new Point(cursor.X, cursor.Y));
+                if (point.X >= 0 && point.Y >= 0 && point.X <= ActualWidth && point.Y <= ActualHeight)
+                {
+                    return;
+                }
+
+                HideInsertionIndicator();
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"处理拖动离开事件时出错: {ex.Message}");
+            }
+        }
+
+        #endregion
 
         private void DesktopManagerWindow_MouseRightButtonDown(object sender, MouseButtonEventArgs e)
         {
@@ -331,7 +613,15 @@ namespace Layouter.Views
             try
             {
                 // 使用现有的服务加载分区数据
-                PartitionDataService.Instance.LoadPartitionData(this, this.WindowId);
+                // 分区数据可能已经由 PartitionDataService 在窗口显示前载入过，
+                // 这里不再重复读一遍同样的文件：
+                // 重复读取会白白多解析一次 JSON、多重建一遍图标对象，
+                // 分区多的时候这部分开销相当可观。
+                if (!IsPartitionDataLoaded)
+                {
+                    PartitionDataService.Instance.LoadPartitionData(this, this.WindowId);
+                    IsPartitionDataLoaded = true;
+                }
 
                 // 加载后同步图标显示方式按钮
                 UpdateIconViewModeButton();
@@ -410,17 +700,15 @@ namespace Layouter.Views
         {
             if (vm != null)
             {
-                originalOpacity = vm.Opacity;
-
                 if (isMouseOver || IsActive || isResizing)
                 {
                     vm.ContentBackground = new SolidColorBrush(Color.FromArgb(40, 0, 0, 0));
-                    this.Opacity = 1.0;
+                    vm.WindowOpacity = vm.Opacity;
                 }
                 else
                 {
                     vm.ContentBackground = new SolidColorBrush(Colors.Transparent);
-                    this.Opacity = originalOpacity * 0.7;
+                    vm.WindowOpacity = vm.InactiveOpacity;
                 }
             }
         }
@@ -880,27 +1168,77 @@ namespace Layouter.Views
             }
         }
 
+        /// <summary>
+        /// 标题栏设置按钮的下拉菜单
+        /// </summary>
+        /// <remarks>
+        /// 这个菜单完全在代码里构建。之前的实现只有「窗口设置」「卷起窗口」两项，
+        /// 而写在 XAML 里的 <c>SettingsPopup</c>（含「分区管理」「备份与还原」）
+        /// 从来没有被打开过——它的 <c>IsOpen</c> 只被赋值为 false，
+        /// 齿轮按钮弹出的却是这里动态创建的 ContextMenu，
+        /// 结果新增的菜单项用户根本看不到。
+        /// 现在所有常用命令统一挂到这个菜单上，并定位到齿轮按钮下方。
+        /// </remarks>
         private void Settings_Click(object sender, RoutedEventArgs e)
         {
-            // 创建右键菜单
-            ContextMenu menu = new ContextMenu();
-
-            // 添加窗口设置菜单项
-            MenuItem settingsItem = new MenuItem() { Header = "窗口设置" };
-            settingsItem.Click += (s, args) =>
+            try
             {
-                var settingsWindow = new PartitionSettingsWindow(vm, false);
-                settingsWindow.ShowDialog();
-            };
-            menu.Items.Add(settingsItem);
+                ContextMenu menu = new ContextMenu();
 
-            // 添加卷起窗口菜单项
-            MenuItem rollUpItem = new MenuItem() { Header = isRolledUp ? "展开窗口" : "卷起窗口" };
-            rollUpItem.Click += (s, args) => ToggleRollUp();
-            menu.Items.Add(rollUpItem);
+                // 分区设置
+                MenuItem partitionSettingsItem = new MenuItem() { Header = "分区设置" };
+                partitionSettingsItem.Click += (s, args) => OpenPartitionSettings();
+                menu.Items.Add(partitionSettingsItem);
 
-            // 显示菜单
-            menu.IsOpen = true;
+                // 分区管理
+                MenuItem partitionManagerItem = new MenuItem() { Header = "分区管理" };
+                partitionManagerItem.Click += (s, args) => ShowPartitionManager();
+                menu.Items.Add(partitionManagerItem);
+
+                // 备份与还原
+                MenuItem backupItem = new MenuItem() { Header = "备份与还原" };
+                backupItem.Click += (s, args) => ShowBackupManager();
+                menu.Items.Add(backupItem);
+
+                // 删除分区
+                MenuItem deleteItem = new MenuItem() { Header = "删除分区" };
+                deleteItem.Click += (s, args) => DeleteCurrentPartition();
+                menu.Items.Add(deleteItem);
+
+                menu.Items.Add(new Separator());
+
+                // 自动排列图标
+                MenuItem arrangeItem = new MenuItem() { Header = "自动排列图标" };
+                arrangeItem.Click += (s, args) => ArrangeIconsInPartition();
+                menu.Items.Add(arrangeItem);
+
+                // 对齐所有分区
+                MenuItem alignItem = new MenuItem() { Header = "对齐所有分区" };
+                alignItem.Click += (s, args) => AlignAllPartitionWindows();
+                menu.Items.Add(alignItem);
+
+                menu.Items.Add(new Separator());
+
+                // 卷起 / 展开窗口
+                MenuItem rollUpItem = new MenuItem() { Header = isRolledUp ? "展开窗口" : "卷起窗口" };
+                rollUpItem.Click += (s, args) => ToggleRollUp();
+                menu.Items.Add(rollUpItem);
+
+                // 菜单挂在齿轮按钮正下方，而不是跟随鼠标弹出
+                if (SettingsButton != null)
+                {
+                    menu.PlacementTarget = SettingsButton;
+                    menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+                    menu.HorizontalOffset = 0;
+                    menu.VerticalOffset = 4;
+                }
+
+                menu.IsOpen = true;
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"打开设置菜单时出错: {ex.Message}");
+            }
         }
 
         private void NewPartition_Click(object sender, RoutedEventArgs e)
@@ -924,14 +1262,18 @@ namespace Layouter.Views
         }
 
 
-        private void PartitionSettings_Click(object sender, RoutedEventArgs e)
+        /// <summary>
+        /// 打开分区设置窗口
+        /// </summary>
+        /// <remarks>
+        /// 设置窗口自己会把设置写回配置文件并回写 ViewModel，
+        /// 这里在确认保存后再补一次分区数据落盘，保证图标布局一并持久化。
+        /// </remarks>
+        private void OpenPartitionSettings()
         {
-            SettingsPopup.IsOpen = false;
-
             try
             {
                 var settingsWindow = new PartitionSettingsWindow(vm, false);
-                settingsWindow.Owner = this;
                 settingsWindow.ShowDialog();
 
                 // 如果设置已保存,更新UI
@@ -939,6 +1281,9 @@ namespace Layouter.Views
                 {
                     // 保存分区数据
                     SavePartitionData();
+
+                    // 背景材质与色调可能变了，重新套用一次
+                    ApplyBackdrop();
                 }
             }
             catch (Exception ex)
@@ -947,11 +1292,11 @@ namespace Layouter.Views
             }
         }
 
-        private void DeletePartition_Click(object sender, RoutedEventArgs e)
+        /// <summary>
+        /// 删除当前分区（分区内的图标会恢复到桌面）
+        /// </summary>
+        private void DeleteCurrentPartition()
         {
-            // 关闭设置菜单
-            SettingsPopup.IsOpen = false;
-
             // 确认是否删除
             MessageBoxResult result = AppMessageBox.Show(
                 "确定要删除该分区吗？分区内的所有图标将会恢复到桌面。",
@@ -966,21 +1311,64 @@ namespace Layouter.Views
             }
         }
 
+        /// <summary>
+        /// 打开分区管理窗口（与托盘菜单中的「分区管理」一致）
+        /// </summary>
+        private void ShowPartitionManager()
+        {
+            try
+            {
+                // 必须使用非模态窗口：模态窗口会禁用本进程的所有窗口，
+                // 导致桌面上的分区在分区管理窗口打开期间完全无法操作。
+                SingletonWindowManager.Instance.ShowWindow<PartitionManagerWindow>(() => new PartitionManagerWindow(), false);
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"显示分区管理窗口时出错: {ex.Message}");
+                AppMessageBox.Show($"显示分区管理窗口时出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// 打开备份与还原窗口（与托盘菜单中的「备份与还原」一致）
+        /// </summary>
+        private void ShowBackupManager()
+        {
+            try
+            {
+                SingletonWindowManager.Instance.ShowWindow<BackupManagerWindow>(() => new BackupManagerWindow(), false);
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"显示备份与还原窗口时出错: {ex.Message}");
+                AppMessageBox.Show($"显示备份与还原窗口时出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
         private void AutoArrange_Click(object sender, RoutedEventArgs e)
         {
-            // 关闭设置菜单
-            SettingsPopup.IsOpen = false;
-
-            // 执行自动排列
-            var viewModel = DataContext as DesktopManagerViewModel;
-            viewModel?.ArrangeIcons();
+            ArrangeIconsInPartition();
         }
 
         private void AlignPartitions_Click(object sender, RoutedEventArgs e)
         {
-            // 关闭设置菜单
-            SettingsPopup.IsOpen = false;
+            AlignAllPartitionWindows();
+        }
 
+        /// <summary>
+        /// 重新排列当前分区内的图标
+        /// </summary>
+        private void ArrangeIconsInPartition()
+        {
+            var viewModel = DataContext as DesktopManagerViewModel;
+            viewModel?.ArrangeIcons();
+        }
+
+        /// <summary>
+        /// 对齐所有分区窗口
+        /// </summary>
+        private void AlignAllPartitionWindows()
+        {
             WindowManagerService.Instance.ArrangeWindows();
         }
 
@@ -1139,6 +1527,9 @@ namespace Layouter.Views
                         // 开始拖拽操作
                         isDragging = true;
 
+                        // 拖动图标同样算作用户操作，搜索高亮随之恢复
+                        ClearAllSearchHighlights();
+
                         // 标记图标正在拖拽
                         draggedIcon.IsDragging = true;
 
@@ -1169,6 +1560,9 @@ namespace Layouter.Views
                         // 仅使用 Copy：隐藏存储中的实体文件必须保留在原处，
                         // 否则会被资源管理器「移动」走，导致存储索引失效。
                         var result = DragDrop.DoDragDrop(this, dataObject, DragDropEffects.Copy);
+
+                        // 拖动结束，插入位置标识不再有意义
+                        HideInsertionIndicator();
 
                         // 拖拽结束，由「拖出方」统一判定落点并完成图标转移。
                         // 之前由目标窗口自行接收，落点落在标题栏等非图标区域时
@@ -1236,16 +1630,25 @@ namespace Layouter.Views
                 DesktopManagerWindow targetWindow = FindPartitionWindow(rootWindow);
                 if (targetWindow != null && !ReferenceEquals(targetWindow, this))
                 {
-                    if (targetWindow.TransferIconFrom(icon, screenPoint))
+                    IconTransferResult transferResult = targetWindow.TransferIconFrom(icon, screenPoint);
+                    var viewModel = this.DataContext as DesktopManagerViewModel;
+
+                    if (transferResult == IconTransferResult.Success)
                     {
-                        var viewModel = this.DataContext as DesktopManagerViewModel;
                         viewModel?.RemoveIcon(icon);
                         SavePartitionData();
                         Log.Information("图标已转移到其它分区");
                     }
+                    else if (transferResult == IconTransferResult.Overwritten)
+                    {
+                        // 覆盖：目标分区保留原有图标，来源处的该图标消失
+                        viewModel?.RemoveIcon(icon);
+                        SavePartitionData();
+                        Log.Information("已选择覆盖，目标分区保留原有图标，来源图标已移除");
+                    }
                     else
                     {
-                        Log.Information("图标转移失败，仍保留在当前分区");
+                        Log.Information("用户取消了图标转移，仍保留在当前分区");
                     }
                     return;
                 }
@@ -1348,8 +1751,10 @@ namespace Layouter.Views
         /// 把屏幕坐标转换为图标内容坐标系中的坐标
         /// </summary>
         /// <remarks>
-        /// 图标区域外面套了滚动条，滚动后容器原点与内容原点不再重合，
-        /// 这里统一把滚动偏移量补上，图标落点与排序才能对得上。
+        /// <see cref="FrameworkElement.PointFromScreen"/> 返回的已经是图标内容坐标：
+        /// 滚动偏移由 ScrollViewer 施加的位移变换处理过了。
+        /// 这里若再叠加一次滚动偏移量，分区滚动后落点就会整体错位，
+        /// 拖到下一行会被算成别的行，跨行排序永远不生效。
         /// </remarks>
         private Point GetIconContainerPoint(Point screenPoint)
         {
@@ -1357,16 +1762,12 @@ namespace Layouter.Views
             {
                 if (iconsContainer != null && iconsContainer.IsVisible)
                 {
-                    Point point = iconsContainer.PointFromScreen(screenPoint);
-                    point.Y += GetIconScrollOffset();
-                    return point;
+                    return iconsContainer.PointFromScreen(screenPoint);
                 }
 
                 if (iconsListContainer != null && iconsListContainer.IsVisible)
                 {
-                    Point point = iconsListContainer.PointFromScreen(screenPoint);
-                    point.Y += GetIconScrollOffset();
-                    return point;
+                    return iconsListContainer.PointFromScreen(screenPoint);
                 }
             }
             catch (Exception ex)
@@ -1378,28 +1779,13 @@ namespace Layouter.Views
         }
 
         /// <summary>
-        /// 获取图标区域的垂直滚动偏移量
+        /// 卡片内排序：把被拖动的图标移动到落点所在的格子
         /// </summary>
-        private double GetIconScrollOffset()
-        {
-            try
-            {
-                if (vm != null && vm.IsListView)
-                {
-                    return IconsListScrollViewer?.VerticalOffset ?? 0;
-                }
-
-                return IconsScrollViewer?.VerticalOffset ?? 0;
-            }
-            catch
-            {
-                return 0;
-            }
-        }
-
-        /// <summary>
-        /// 卡片内排序：把被拖动的图标移动到落点最近的图标位置
-        /// </summary>
+        /// <remarks>
+        /// 目标位置按落点所在的「行/列」计算，而不是取离落点最近的图标：
+        /// 网格是规整排列的，按格子定位才能保证拖到哪一行就落到哪一行，
+        /// 跨行、跨列的结果都与用户看到的一致。
+        /// </remarks>
         private void ReorderIcon(DesktopIcon icon, Point dropPoint)
         {
             try
@@ -1419,38 +1805,15 @@ namespace Layouter.Views
                 // 列表视图按行排列，直接按落点所在行计算目标位置
                 if (viewModel.IsListView)
                 {
-                    ReorderIconInList(viewModel, icon, dropPoint, currentIndex);
+                    int listTarget = GetTargetIndexInList(viewModel, dropPoint);
+                    MoveIconToIndex(viewModel, icon, currentIndex, listTarget);
+                    viewModel.ArrangeIcons();
+                    SavePartitionData();
                     return;
                 }
 
-                int targetIndex = currentIndex;
-                double bestDistance = double.MaxValue;
-
-                for (int i = 0; i < viewModel.Icons.Count; i++)
-                {
-                    var other = viewModel.Icons[i];
-                    if (other == null || ReferenceEquals(other, icon))
-                    {
-                        continue;
-                    }
-
-                    double dx = dropPoint.X - other.Position.X;
-                    double dy = dropPoint.Y - other.Position.Y;
-                    double distance = dx * dx + dy * dy;
-
-                    if (distance < bestDistance)
-                    {
-                        bestDistance = distance;
-                        targetIndex = i;
-                    }
-                }
-
-                if (targetIndex != currentIndex)
-                {
-                    viewModel.Icons.Move(currentIndex, targetIndex);
-                    Log.Information($"图标已在卡片内重新排序：{currentIndex} → {targetIndex}");
-                }
-
+                int targetIndex = GetTargetIndexByPoint(viewModel, dropPoint);
+                MoveIconToIndex(viewModel, icon, currentIndex, targetIndex);
                 viewModel.ArrangeIcons();
                 SavePartitionData();
             }
@@ -1461,25 +1824,59 @@ namespace Layouter.Views
         }
 
         /// <summary>
-        /// 列表视图下的排序：按落点所在的行计算目标位置
+        /// 按落点所在的网格位置计算目标序号
         /// </summary>
-        private void ReorderIconInList(DesktopManagerViewModel viewModel, DesktopIcon icon, Point dropPoint, int currentIndex)
+        /// <remarks>
+        /// 网格从 IconSpacing 开始，每列占用「图标宽度 + 间距」，
+        /// 每行占用「图标高度 + 间距」，据此可以直接换算出第几行第几列。
+        /// </remarks>
+        private static int GetTargetIndexByPoint(DesktopManagerViewModel viewModel, Point contentPoint)
         {
-            // 列表单行高度（与列表模板中的 MinHeight 保持一致）
-            const double rowHeight = 30;
+            int columns = Math.Max(1, viewModel.IconColumnCount);
+            double spacing = DesktopManagerViewModel.IconSpacing;
 
-            // 列表容器内边距为 5
-            int targetIndex = (int)Math.Floor((dropPoint.Y - 5) / rowHeight);
-            targetIndex = Math.Max(0, Math.Min(targetIndex, viewModel.Icons.Count - 1));
+            int column = (int)Math.Floor((contentPoint.X - spacing) / viewModel.GridColumnPitch);
+            int row = (int)Math.Floor((contentPoint.Y - spacing) / viewModel.GridRowPitch);
 
-            if (targetIndex != currentIndex)
+            column = Math.Max(0, Math.Min(column, columns - 1));
+            row = Math.Max(0, row);
+
+            int index = row * columns + column;
+            return Math.Max(0, Math.Min(index, viewModel.Icons.Count - 1));
+        }
+
+        /// <summary>
+        /// 列表视图下按落点所在行计算目标序号
+        /// </summary>
+        private static int GetTargetIndexInList(DesktopManagerViewModel viewModel, Point contentPoint)
+        {
+            double rowHeight = DesktopManagerViewModel.ListRowHeight;
+            int index = (int)Math.Floor((contentPoint.Y + LayoutTolerance) / rowHeight);
+            return Math.Max(0, Math.Min(index, viewModel.Icons.Count - 1));
+        }
+
+        /// <summary>
+        /// 把图标移动到指定序号，并重新排布
+        /// </summary>
+        private void MoveIconToIndex(DesktopManagerViewModel viewModel, DesktopIcon icon, int currentIndex, int targetIndex)
+        {
+            if (currentIndex < 0 || targetIndex < 0 || targetIndex == currentIndex)
             {
-                viewModel.Icons.Move(currentIndex, targetIndex);
-                Log.Information($"图标已在列表内重新排序：{currentIndex} → {targetIndex}");
+                return;
             }
 
+            // 换位不能改变用户当前看到的滚动位置
+            double scrollOffset = IconsScrollViewer?.VerticalOffset ?? 0;
+
+            viewModel.Icons.Move(currentIndex, targetIndex);
             viewModel.ArrangeIcons();
-            SavePartitionData();
+
+            if (scrollOffset > 0 && IconsScrollViewer != null)
+            {
+                IconsScrollViewer.ScrollToVerticalOffset(scrollOffset);
+            }
+
+            Log.Information($"图标已在卡片内重新排序：{currentIndex} → {targetIndex}");
         }
 
         /// <summary>
@@ -1487,23 +1884,30 @@ namespace Layouter.Views
         /// </summary>
         /// <param name="icon">被拖动的图标</param>
         /// <param name="screenPoint">落点（屏幕坐标）</param>
-        /// <returns>是否接收成功</returns>
-        public bool TransferIconFrom(DesktopIcon icon, Point screenPoint)
+        /// <returns>转移结果</returns>
+        public IconTransferResult TransferIconFrom(DesktopIcon icon, Point screenPoint)
         {
             try
             {
                 var viewModel = this.DataContext as DesktopManagerViewModel;
                 if (viewModel == null || icon == null)
                 {
-                    return false;
+                    return IconTransferResult.Cancelled;
                 }
 
-                // 目标分区已经存在同一个图标时不再重复添加
-                if (viewModel.Icons.Any(i => i.IconPath != null
-                    && icon.IconPath != null
-                    && i.IconPath.Equals(icon.IconPath, StringComparison.OrdinalIgnoreCase)))
+                // 目标分区已经存在同一个图标时，让用户决定是取消还是覆盖
+                var existing = FindDuplicateIcon(viewModel, icon.IconPath);
+                if (existing != null)
                 {
-                    return false;
+                    if (!ConfirmOverwriteDuplicate(existing))
+                    {
+                        Log.Information($"用户取消了重复图标「{existing.Name}」的转移");
+                        return IconTransferResult.Cancelled;
+                    }
+
+                    // 覆盖：目标分区保持不变（不重复添加），由拖出方移除来源图标
+                    Log.Information($"选择覆盖：目标分区保留原有图标「{existing.Name}」");
+                    return IconTransferResult.Overwritten;
                 }
 
                 var moved = new DesktopIcon
@@ -1520,12 +1924,103 @@ namespace Layouter.Views
                 viewModel.AddIcon(moved);
                 viewModel.ArrangeIcons();
                 SavePartitionData();
-                return true;
+                return IconTransferResult.Success;
             }
             catch (Exception ex)
             {
                 Log.Information($"接收其它分区的图标失败: {ex.Message}");
-                return false;
+                return IconTransferResult.Cancelled;
+            }
+        }
+
+        /// <summary>
+        /// 在分区中查找与给定路径指向同一文件的图标
+        /// </summary>
+        /// <remarks>
+        /// 分区里的图标可能记录的是「隐藏存储」中的存放路径，
+        /// 而桌面上拖过来的是原始路径，这里统一换算回原始路径再比较。
+        /// </remarks>
+        private static DesktopIcon? FindDuplicateIcon(DesktopManagerViewModel viewModel, string iconPath)
+        {
+            if (viewModel == null || string.IsNullOrEmpty(iconPath))
+            {
+                return null;
+            }
+
+            string normalized = NormalizeIconPath(iconPath);
+            if (string.IsNullOrEmpty(normalized))
+            {
+                return null;
+            }
+
+            return viewModel.Icons.FirstOrDefault(i =>
+                !string.IsNullOrEmpty(i.IconPath)
+                && string.Equals(NormalizeIconPath(i.IconPath), normalized, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// 把图标路径换算成原始路径（隐藏存储中的存放路径会被还原）
+        /// </summary>
+        private static string NormalizeIconPath(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                return path;
+            }
+
+            try
+            {
+                return DesktopIconService.Instance.RemoveHiddenPathInIconPath(path);
+            }
+            catch
+            {
+                return path;
+            }
+        }
+
+        /// <summary>
+        /// 目标分区已存在相同图标时，询问用户是取消还是覆盖
+        /// </summary>
+        /// <returns>true 表示覆盖（来源图标消失），false 表示取消（不做任何改动）</returns>
+        private static bool ConfirmOverwriteDuplicate(DesktopIcon? existing)
+        {
+            string name = string.IsNullOrEmpty(existing?.Name) ? "该图标" : existing.Name;
+
+            return AppMessageBox.ShowConfirm(
+                $"目标分区中已经存在相同图标「{name}」。\n\n" +
+                "选择「是」：覆盖——目标分区保留原有图标，来源处的该图标将被移除。\n" +
+                "选择「否」：取消——本次拖动不做任何改动。",
+                "图标已存在",
+                isDestructive: true);
+        }
+
+        /// <summary>
+        /// 桌面上的图标与分区内已有图标重复时按「覆盖」处理：
+        /// 把桌面上这份搬进隐藏存储，桌面图标随之消失，分区保留原有图标。
+        /// </summary>
+        private static void HideDuplicateDesktopIcon(string filePath)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(filePath))
+                {
+                    return;
+                }
+
+                if (File.Exists(filePath) || Directory.Exists(filePath))
+                {
+                    // 存放名由原始路径推导，重复隐藏会落到同一个存放文件上，不会产生冗余副本
+                    DesktopIconService.Instance.HideDesktopIcon(filePath, out _, refreshDesktop: true);
+                    return;
+                }
+
+                // Shell 虚拟项只需切换可见性，不搬运文件
+                string shellPath = DesktopIconService.Instance.RemoveHiddenPathInIconPath(filePath);
+                DesktopIconService.Instance.HideDesktopIcon(shellPath, out _, refreshDesktop: false);
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"处理重复图标失败: {ex.Message}");
             }
         }
 
@@ -1705,20 +2200,16 @@ namespace Layouter.Views
                 // 在拖放结束时获取鼠标坐标
                 Point dropPoint = e.GetPosition((ItemsControl)sender);
 
-                // 图标区域可能处于滚动状态，落点需要换算到图标内容坐标系
-                if (ReferenceEquals(sender, iconsContainer))
-                {
-                    dropPoint.Y += IconsScrollViewer?.VerticalOffset ?? 0;
-                }
-                else if (ReferenceEquals(sender, iconsListContainer))
-                {
-                    dropPoint.Y += IconsListScrollViewer?.VerticalOffset ?? 0;
-                }
+                // GetPosition 得到的就是图标内容坐标（滚动偏移已包含在 ScrollViewer 的位移里），
+                // 这里不能再叠加一次，否则分区滚动后落点会整体错位。
 
                 if (HandleIconDrop(e.Data, dropPoint))
                 {
                     e.Handled = true;
                 }
+
+                // 落点已确定，隐藏插入位置标识
+                HideInsertionIndicator();
             }
             catch (Exception ex)
             {
@@ -1774,13 +2265,20 @@ namespace Layouter.Views
                         // 处理所有拖放的文件
                         foreach (string filePath in files)
                         {
-                            // 检查是否已经在这个分区中 - 如果已存在则跳过此文件
-                            // 分区里已有的图标记的是存放路径，这里把两种写法都比对一遍
-                            string predictedStoredPath = DesktopIconService.Instance.CombineHiddenPathWithIconPath(filePath);
-                            if (viewModel.Icons.Any(i =>
-                                    string.Equals(i.IconPath, filePath, StringComparison.OrdinalIgnoreCase)
-                                    || string.Equals(i.IconPath, predictedStoredPath, StringComparison.OrdinalIgnoreCase)))
+                            // 分区里已有同一文件时，让用户决定是取消还是覆盖，
+                            // 避免图标被静默丢弃、用户却毫无察觉
+                            var existing = FindDuplicateIcon(viewModel, filePath);
+                            if (existing != null)
                             {
+                                if (!ConfirmOverwriteDuplicate(existing))
+                                {
+                                    Log.Information($"用户取消了重复图标「{existing.Name}」的拖入");
+                                    continue;
+                                }
+
+                                // 覆盖：分区保留原有图标，桌面上的这份图标消失
+                                HideDuplicateDesktopIcon(filePath);
+                                Log.Information($"选择覆盖：分区保留原有图标「{existing.Name}」");
                                 continue;
                             }
 
@@ -2018,6 +2516,23 @@ namespace Layouter.Views
                     // 标题栏显示搬运进度
                     await Dispatcher.InvokeAsync(() => vm?.BeginTransfer(targets.Count));
 
+                    // 先把图标提取好，再搬文件：
+                    // 快捷方式一旦被搬进隐藏存储，原路径就失效了，
+                    // 那时再去解析快捷方式只能拿到空白图标。
+                    // 这里提前解析并缓存「图标来源」，搬运前后取到的图标完全一致。
+                    try
+                    {
+                        ShortCutUtil.WarmupIconCache(
+                            targets
+                                .Where(t => t.Icon != null && !string.IsNullOrEmpty(t.OriginalPath))
+                                .Select(t => (t.OriginalPath, (int)Math.Round(t.Icon.Size.Width)))
+                                .ToList());
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Information($"搬运前预热图标失败: {ex.Message}");
+                    }
+
                     var results = DesktopIconService.Instance.HideDesktopIcons(
                         targets.Select(t => t.OriginalPath).ToList(),
                         (completed, total) =>
@@ -2107,6 +2622,9 @@ namespace Layouter.Views
 
         private void Icon_MouseDown(object sender, MouseButtonEventArgs e)
         {
+            // 本次按下还没有落到名称上，先清掉上一轮遗留的标记
+            clickedOnIconName = false;
+
             // 检查点击的是否是图标
             var element = e.OriginalSource as FrameworkElement;
             while (element != null && !(element.Tag is DesktopIcon))
@@ -2173,6 +2691,13 @@ namespace Layouter.Views
                     return;
                 }
 
+                // 用户开始操作图标了，搜索高亮随之恢复正常外观
+                ClearAllSearchHighlights();
+
+                // 这次点击是否落在名称文字上（由名称文字的抬起事件打上的标记）
+                bool onIconName = clickedOnIconName;
+                clickedOnIconName = false;
+
                 DateTime now = DateTime.Now;
 
                 // 判断是否是双击（同一个图标在短时间内点击两次）
@@ -2194,8 +2719,13 @@ namespace Layouter.Views
 
                     if (ReferenceEquals(selectedIcon, icon))
                     {
-                        // 已经选中的图标再次单击 → 进入重命名
-                        BeginRenameIcon(icon);
+                        // 已经选中的图标再次单击：保持选中状态即可。
+                        // 只有点在名称文字上时才进入重命名，
+                        // 否则双击图标时第二次单击就会误入编辑状态。
+                        if (onIconName)
+                        {
+                            BeginRenameIcon(icon);
+                        }
                     }
                     else
                     {
@@ -2204,6 +2734,26 @@ namespace Layouter.Views
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// 点击图标的名称文字
+        /// </summary>
+        /// <remarks>
+        /// 名称文字是图标项内部的元素，它的抬起事件会先于图标项冒泡上来。
+        /// 这里只负责记下「这次点击落在名称上」，
+        /// 具体是选中还是进入重命名，仍由图标项统一处理，
+        /// 避免同一套逻辑散落在两处。
+        /// </remarks>
+        private void IconName_MouseUp(object sender, MouseButtonEventArgs e)
+        {
+            // 列表视图不通过点击名称进入重命名，只允许用 F2
+            if (vm != null && vm.IsListView)
+            {
+                return;
+            }
+
+            clickedOnIconName = true;
         }
 
         #region 图标选中与重命名
@@ -2223,6 +2773,178 @@ namespace Layouter.Views
             if (selectedIcon != null)
             {
                 selectedIcon.IsSelected = true;
+            }
+        }
+
+        /// <summary>
+        /// 定位到指定图标：滚动到可见位置并高亮
+        /// </summary>
+        /// <remarks>
+        /// 供全局搜索使用。分区可能处于卷起状态，也可能被其它分区挡住，
+        /// 这里一并处理，用户回车后能立刻看到被定位到的那个图标。
+        /// </remarks>
+        public void FocusIcon(DesktopIcon icon)
+        {
+            if (icon == null)
+            {
+                return;
+            }
+
+            try
+            {
+                // 分区卷起时先展开，否则看不到图标
+                if (isRolledUp)
+                {
+                    ToggleRollUp();
+                }
+
+                // 同一时间只保留一个搜索高亮：
+                // 之前命中的图标可能还留在别的分区里，这里一并清掉
+                ClearAllSearchHighlights();
+
+                icon.IsSearchHighlighted = true;
+                SelectIcon(icon);
+
+                ScrollIconIntoView(icon);
+                BringPartitionToFront();
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"定位图标失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 清除本分区中所有图标的搜索高亮
+        /// </summary>
+        /// <remarks>
+        /// 高亮只是「刚刚被搜索定位到」的一次性提示，
+        /// 用户一旦开始操作其它图标就应该恢复正常外观。
+        /// </remarks>
+        public void ClearSearchHighlight()
+        {
+            if (vm == null)
+            {
+                return;
+            }
+
+            foreach (var icon in vm.Icons)
+            {
+                if (icon != null)
+                {
+                    icon.IsSearchHighlighted = false;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 清除全部分区中的搜索高亮
+        /// </summary>
+        public static void ClearAllSearchHighlights()
+        {
+            try
+            {
+                foreach (var window in WindowManagerService.Instance.GetAllWindows())
+                {
+                    window?.ClearSearchHighlight();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"清除搜索高亮失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 重新排列当前分区内的图标并保存布局
+        /// </summary>
+        /// <remarks>
+        /// 供全局快捷键「自动排列图标」调用。
+        /// </remarks>
+        public void ArrangeIconsNow()
+        {
+            try
+            {
+                vm?.ArrangeIcons();
+                SavePartitionData();
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"自动排列分区图标失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 打开图标（等同于双击图标）
+        /// </summary>
+        public void OpenIcon(DesktopIcon icon)
+        {
+            if (icon == null)
+            {
+                return;
+            }
+
+            // 图标已经打开了，搜索高亮不再有意义
+            ClearSearchHighlight();
+
+            OpenFileOrProgram(icon.IconPath);
+        }
+
+        /// <summary>
+        /// 把图标滚动到可见区域
+        /// </summary>
+        private void ScrollIconIntoView(DesktopIcon icon)
+        {
+            try
+            {
+                if (vm != null && vm.IsListView)
+                {
+                    int index = vm.Icons.IndexOf(icon);
+                    if (index < 0)
+                    {
+                        return;
+                    }
+
+                    double listOffset = index * DesktopManagerViewModel.ListRowHeight - (IconsListScrollViewer?.ViewportHeight ?? 0) / 2;
+                    IconsListScrollViewer?.ScrollToVerticalOffset(Math.Max(0, listOffset));
+                    return;
+                }
+
+                double offset = icon.Position.Y - (IconsScrollViewer?.ViewportHeight ?? 0) / 2;
+                IconsScrollViewer?.ScrollToVerticalOffset(Math.Max(0, offset));
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"滚动图标到可见区域失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 把分区窗口提到最前
+        /// </summary>
+        /// <remarks>
+        /// 分区是桌面层的工具窗口，直接 Activate 不一定生效。
+        /// 先置顶再取消置顶是让窗口置前的通用做法，
+        /// 置顶之后立刻还原，不会抢走用户的置顶设置。
+        /// </remarks>
+        private void BringPartitionToFront()
+        {
+            try
+            {
+                IntPtr hwnd = new WindowInteropHelper(this).Handle;
+                if (hwnd == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                Win32.SetWindowPos(hwnd, Win32.HWND_TOPMOST, 0, 0, 0, 0,
+                    Win32.SWP_NOMOVE | Win32.SWP_NOSIZE | Win32.SWP_SHOWWINDOW);
+                Win32.SetWindowPos(hwnd, Win32.HWND_NOTOPMOST, 0, 0, 0, 0,
+                    Win32.SWP_NOMOVE | Win32.SWP_NOSIZE);
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"分区置前失败: {ex.Message}");
             }
         }
 
@@ -2536,10 +3258,63 @@ namespace Layouter.Views
 
                 // 更新锁定状态
                 UpdateLockState(vm.IsLocked);
+
+                // 样式里的透明度要立刻生效，否则窗口会先用默认值亮一下
+                UpdateWindowOpacity();
+
+                // 背景材质与色调
+                ApplyBackdrop();
             }
             catch (Exception ex)
             {
                 Log.Information($"应用样式配置时出错: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 给分区窗口套上背景材质（亚克力 / 云母）
+        /// </summary>
+        /// <remarks>
+        /// 材质要靠窗口自身的透明区域透出来，
+        /// 所以启用材质时窗口背景会改成全透明，由色调层负责上色；
+        /// 关闭材质则恢复原来的半透明底色。
+        /// </remarks>
+        private void ApplyBackdrop()
+        {
+            if (vm == null)
+            {
+                return;
+            }
+
+            try
+            {
+                IntPtr hwnd = new WindowInteropHelper(this).Handle;
+
+                if (vm.Backdrop == PartitionBackdrop.None)
+                {
+                    WindowBackdrop.Clear(hwnd);
+                    this.Background = DefaultWindowBackground;
+                    TintLayer.Visibility = Visibility.Collapsed;
+                    return;
+                }
+
+                TintLayer.Visibility = Visibility.Visible;
+                this.Background = Brushes.Transparent;
+
+                // 色调由 WPF 叠加层表现，DWM 只负责毛玻璃模糊
+                bool applied = WindowBackdrop.Apply(this, vm.Backdrop);
+
+                if (!applied)
+                {
+                    // 当前系统不支持该材质，退回普通背景，避免窗口变成一片空白
+                    WindowBackdrop.Clear(hwnd);
+                    this.Background = DefaultWindowBackground;
+                    Log.Information($"当前系统不支持背景材质 {vm.Backdrop}，已退回普通背景");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"应用背景材质时出错: {ex.Message}");
             }
         }
 
@@ -2806,5 +3581,23 @@ namespace Layouter.Views
 
         #endregion
 
+    }
+
+    /// <summary>
+    /// 跨分区拖动图标的处理结果
+    /// </summary>
+    public enum IconTransferResult
+    {
+        /// <summary>转移成功，目标分区已添加该图标</summary>
+        Success,
+
+        /// <summary>用户取消，分区内容保持不变</summary>
+        Cancelled,
+
+        /// <summary>
+        /// 用户选择覆盖：目标分区保留原有图标（不重复添加），
+        /// 拖出方应移除来源处的该图标
+        /// </summary>
+        Overwritten
     }
 }

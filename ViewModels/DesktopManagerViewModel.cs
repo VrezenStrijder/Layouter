@@ -8,6 +8,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using FluentIcons.Common;
 using Layouter.Models;
+using Layouter.Utility;
 
 namespace Layouter.ViewModels
 {
@@ -28,6 +29,24 @@ namespace Layouter.ViewModels
 
         private string name;
         private double opacity = 0.90;
+
+        /// <summary>未选中状态下的分区透明度</summary>
+        private double inactiveOpacity = 0.63;
+
+        /// <summary>实际生效的窗口透明度</summary>
+        private double windowOpacity = 0.90;
+
+        /// <summary>背景材质</summary>
+        private PartitionBackdrop backdrop = PartitionBackdrop.None;
+
+        /// <summary>背景材质色调浓度</summary>
+        private double tintOpacity = 0.05;
+
+        /// <summary>自定义色调，null 表示跟随标题栏背景色</summary>
+        private Color? tintColorOverride;
+
+        /// <summary>色调叠加层用的画刷（颜色跟随标题栏背景色）</summary>
+        private SolidColorBrush tintBrush = new SolidColorBrush(Color.FromArgb(13, 0, 0, 0));
         private string backgroundColor = "Transparent";
         private SolidColorBrush titleForeground = new SolidColorBrush(Colors.White);
         private SolidColorBrush titleBackground = new SolidColorBrush(Colors.Black);
@@ -78,17 +97,10 @@ namespace Layouter.ViewModels
         public double PartitionHeight
         {
             get => partitionHeight;
-            set
-            {
-                if (SetProperty(ref partitionHeight, value))
-                {
-                    UpdateIconsViewHeight();
-                }
-            }
+            set => SetProperty(ref partitionHeight, value);
         }
 
         private double iconsContentHeight;
-        private double iconsViewHeight;
 
         /// <summary>
         /// 图标内容区高度（网格视图）
@@ -101,45 +113,6 @@ namespace Layouter.ViewModels
         {
             get => iconsContentHeight;
             set => SetProperty(ref iconsContentHeight, value);
-        }
-
-        /// <summary>
-        /// 图标区可见高度（始终按整行对齐）
-        /// </summary>
-        /// <remarks>
-        /// 图标区高度如果不是整行倍数，最后一行会只露出一半，看起来像是排版出错。
-        /// 这里把可见高度收敛到「能完整放下多少行就放多少行」，
-        /// 多出来的空间留成分区底部的空白（分区背景是透明的，不会看出来），
-        /// 超出部分则交给垂直滚动条查看。
-        /// </remarks>
-        public double IconsViewHeight
-        {
-            get => iconsViewHeight;
-            private set => SetProperty(ref iconsViewHeight, value);
-        }
-
-        /// <summary>
-        /// 按当前分区高度重新计算图标区可见高度
-        /// </summary>
-        private void UpdateIconsViewHeight()
-        {
-            double available = Math.Max(0, partitionHeight);
-            double height;
-
-            if (IsListView)
-            {
-                // 列表视图按固定行高排列
-                double rows = Math.Floor(available / ListRowHeight + LayoutTolerance);
-                height = rows * ListRowHeight;
-            }
-            else
-            {
-                int rows = CalculateRowCount(available);
-                height = rows > 0 ? GetGridHeight(rows) : 0;
-            }
-
-            // 不能超出容器本身的高度
-            IconsViewHeight = Math.Min(height, available);
         }
 
         #region 搬运进度
@@ -257,9 +230,6 @@ namespace Layouter.ViewModels
 
                 measuredItemHeight = value;
                 OnPropertyChanged(nameof(EffectiveItemHeight));
-
-                // 行高变了，可见高度能容纳的整行数也会跟着变
-                UpdateIconsViewHeight();
             }
         }
 
@@ -298,7 +268,11 @@ namespace Layouter.ViewModels
                     c.A = baseAlpha;
                 }
 
-                SetProperty(ref titleBackground, new SolidColorBrush(c));
+                // 色调跟随标题栏背景色，标题栏改色时同步刷新叠加层
+                if (SetProperty(ref titleBackground, new SolidColorBrush(c)))
+                {
+                    UpdateTintBrush();
+                }
             }
         }
 
@@ -323,11 +297,108 @@ namespace Layouter.ViewModels
         }
 
 
-        // 分区窗口透明度
+        // 分区窗口透明度（选中状态）
         public double Opacity
         {
             get => opacity;
             set => SetProperty(ref opacity, value);
+        }
+
+        /// <summary>
+        /// 分区窗口透明度（未选中状态）
+        /// </summary>
+        /// <remarks>
+        /// 分区被激活或鼠标悬停时用 <see cref="Opacity"/>，
+        /// 其余时间用这个值，两者可以分别调整。
+        /// </remarks>
+        public double InactiveOpacity
+        {
+            get => inactiveOpacity;
+            set => SetProperty(ref inactiveOpacity, value);
+        }
+
+        /// <summary>
+        /// 实际生效的窗口透明度
+        /// </summary>
+        /// <remarks>
+        /// 由窗口根据当前是选中还是未选中状态写入，
+        /// XAML 里绑定的是这个属性，避免绑定被代码里的赋值顶掉。
+        /// </remarks>
+        public double WindowOpacity
+        {
+            get => windowOpacity;
+            set => SetProperty(ref windowOpacity, value);
+        }
+
+        /// <summary>
+        /// 分区窗口的背景材质
+        /// </summary>
+        /// <remarks>
+        /// 亚克力 / 云母让分区像一块磨砂玻璃贴在桌面上，
+        /// 未开启时保持原来的半透明纯色背景。
+        /// </remarks>
+        public PartitionBackdrop Backdrop
+        {
+            get => backdrop;
+            set => SetProperty(ref backdrop, value);
+        }
+
+        /// <summary>背景材质色调的浓度（0~1）</summary>
+        public double TintOpacity
+        {
+            get => tintOpacity;
+            set
+            {
+                if (SetProperty(ref tintOpacity, value))
+                {
+                    UpdateTintBrush();
+                }
+            }
+        }
+
+        /// <summary>
+        /// 自定义色调
+        /// </summary>
+        /// <remarks>
+        /// 为 null 时色调跟随标题栏背景色；设为具体颜色后使用该颜色。
+        /// </remarks>
+        public Color? TintColorOverride
+        {
+            get => tintColorOverride;
+            set
+            {
+                if (SetProperty(ref tintColorOverride, value))
+                {
+                    UpdateTintBrush();
+                }
+            }
+        }
+
+        /// <summary>
+        /// 色调叠加层
+        /// </summary>
+        /// <remarks>
+        /// 合成器只做毛玻璃模糊，色调由这一层半透明色块叠加出来；
+        /// 颜色默认跟随标题栏背景色（也可自定义），浓度即这一层的 alpha。
+        /// </remarks>
+        public SolidColorBrush TintBrush
+        {
+            get => tintBrush;
+            set => SetProperty(ref tintBrush, value);
+        }
+
+        /// <summary>
+        /// 按当前色调与浓度刷新叠加层
+        /// </summary>
+        private void UpdateTintBrush()
+        {
+            double clamped = Math.Clamp(tintOpacity, 0, 1);
+            byte alpha = (byte)Math.Round(clamped * 255);
+
+            // 未指定自定义色时跟随标题栏背景色
+            Color color = tintColorOverride ?? titleBackground.Color;
+
+            TintBrush = new SolidColorBrush(Color.FromArgb(alpha, color.R, color.G, color.B));
         }
 
         // 图标大小
@@ -413,9 +484,6 @@ namespace Layouter.ViewModels
                 {
                     OnPropertyChanged(nameof(IsGridView));
                     OnPropertyChanged(nameof(IsListView));
-
-                    // 网格与列表的行高不同，可见高度需要按新的行高重新计算
-                    UpdateIconsViewHeight();
                 }
             }
         }

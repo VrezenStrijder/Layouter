@@ -4,6 +4,7 @@ using System.IO;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Threading;
 using Layouter.Models;
 using Layouter.Utility;
 using Layouter.ViewModels;
@@ -342,6 +343,136 @@ namespace Layouter.Services
         }
 
         /// <summary>
+        /// 渐进式恢复上次会话的所有窗口
+        /// </summary>
+        /// <remarks>
+        /// 启动时最耗时的两件事是「读配置」和「提取图标位图」，
+        /// 两者都在 UI 线程上做就会表现为打开程序后卡住好几秒。
+        /// 这里把图标提取放到后台并行执行，窗口显示前等它完成；
+        /// 分区之间也让出 UI 线程，整个恢复过程中界面都是可响应的。
+        /// </remarks>
+        public async Task RestoreWindowsAsync()
+        {
+            try
+            {
+                LoadWindowIdMapping();
+
+                var metadata = GetMetadata();
+
+                if (metadata == null || metadata.WindowIds == null || metadata.WindowIds.Count == 0)
+                {
+                    return;
+                }
+
+                foreach (var windowId in metadata.WindowIds)
+                {
+                    if (string.IsNullOrEmpty(windowId) || windowId == "0")
+                    {
+                        Log.Information("跳过无效的窗口ID: " + (windowId ?? "null"));
+                        continue;
+                    }
+
+                    bool isVisible = GeneralSettingsService.Instance.GetPartitionVisibility(windowId);
+                    if (!isVisible)
+                    {
+                        Log.Information($"跳过不可见的窗口: {windowId}");
+                        continue;
+                    }
+
+                    bool idAlreadyUsed = windowGuids.Values.Contains(windowId);
+                    if (idAlreadyUsed)
+                    {
+                        Log.Information($"ID已被使用,跳过: {windowId}");
+                        continue;
+                    }
+
+                    await ShowWindowAsync(windowId);
+
+                    // 让出 UI 线程，用户此时可以正常操作托盘图标
+                    await Dispatcher.Yield(DispatcherPriority.Background);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"恢复窗口失败: {ex.Message}");
+
+                try
+                {
+                    var window = new DesktopManagerWindow();
+                    windowGuids[window] = Guid.NewGuid().ToString();
+                    window.Show();
+                }
+                catch (Exception inner)
+                {
+                    Log.Information($"创建备用分区窗口失败: {inner.Message}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// 显示已保存的分区窗口（先在后台准备好图标再显示）
+        /// </summary>
+        private async Task ShowWindowAsync(string windowId)
+        {
+            var window = new DesktopManagerWindow();
+            windowGuids[window] = windowId;
+
+            string partitionPath = Path.Combine(dataDirectory, $"partition_{windowId}.json");
+            if (!File.Exists(partitionPath))
+            {
+                Log.Information($"未找到窗口 {windowId} 的配置,使用新ID");
+                string newId = Guid.NewGuid().ToString();
+                windowGuids[window] = newId;
+                window.Show();
+                return;
+            }
+
+            Log.Information($"为窗口 {window.GetHashCode()} 加载配置: {windowId}");
+            LoadPartitionData(window, windowId);
+            window.Sync(window);
+
+            // 图标位图提取很慢，放到后台并行完成后再显示窗口。
+            // 图标路径必须在 UI 线程上先取出来：
+            // Icons 是 ObservableCollection，跨线程访问会抛异常。
+            var iconItems = CollectIconItems(window);
+            await Task.Run(() => ShortCutUtil.WarmupIconCache(iconItems));
+
+            window.Show();
+        }
+
+        /// <summary>
+        /// 收集分区内的图标路径与尺寸（在 UI 线程上调用）
+        /// </summary>
+        private static List<(string Path, int Size)> CollectIconItems(DesktopManagerWindow window)
+        {
+            var items = new List<(string, int)>();
+
+            try
+            {
+                if (window?.DataContext is not DesktopManagerViewModel viewModel)
+                {
+                    return items;
+                }
+
+                foreach (var icon in viewModel.Icons)
+                {
+                    if (icon == null || string.IsNullOrEmpty(icon.IconPath))
+                    {
+                        continue;
+                    }
+
+                    items.Add((icon.IconPath, (int)Math.Round(icon.Size.Width)));
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"收集分区图标时出错: {ex.Message}");
+            }
+
+            return items;
+        }
+
+        /// <summary>
         /// 恢复窗口显示
         /// </summary>
         public void RestoreWindow(string windowId)
@@ -466,6 +597,9 @@ namespace Layouter.Services
                         }
 
                         Log.Information($"成功加载分区 '{viewModel.Name}' 数据,包含 {viewModel.Icons.Count} 个图标");
+
+                        // 标记数据已载入：窗口显示时不再重复读一遍同样的文件
+                        window.IsPartitionDataLoaded = true;
                     }
                 }
                 else

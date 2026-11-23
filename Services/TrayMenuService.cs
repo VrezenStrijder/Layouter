@@ -74,6 +74,12 @@ namespace Layouter.Services
         /// </summary>
         private void CreateBasicMenuItems()
         {
+            // 全局搜索菜单项
+            var searchItem = CreateMenuItem("查询", IconUtil.CreateMenuItemIcon(FluentIcons.Common.Symbol.Search, Colors.DodgerBlue));
+            searchItem.Click += (s, e) => ShowGlobalSearch();
+            trayMenu.Items.Add(searchItem);
+            menuItems["GlobalSearch"] = searchItem;
+
             // 新建分区菜单项
             var newPartitionItem = CreateMenuItem("新建分区", IconUtil.CreateMenuItemIcon(FluentIcons.Common.Symbol.AddCircle, Colors.DodgerBlue));
             newPartitionItem.Click += (s, e) => viewModel.NewWindowCommand.Execute(null);
@@ -104,7 +110,7 @@ namespace Layouter.Services
         }
 
         /// <summary>
-        /// 创建设置子菜单（自启动、双击桌面隐藏元素、全局分区设置）
+        /// 创建设置子菜单（自启动、双击桌面隐藏元素、搜索设置、全局分区设置、快捷键）
         /// </summary>
         private void CreateSettingsMenuItems(MenuItem settingsMenuItem)
         {
@@ -133,11 +139,25 @@ namespace Layouter.Services
             desktopToggleMenuItem.Items.Add(desktopToggleItem);
             menuItems["DesktopDoubleClickToggleItem"] = desktopToggleItem;
 
+            // 搜索设置：全盘搜索开关、最短字符数、索引状态与重建都收在该面板里，
+            // 不再拆成多级子菜单（原先要在「全文件系统搜索」子菜单里逐项点）
+            var searchSettingsItem = CreateMenuItem("搜索设置",
+                IconUtil.CreateMenuItemIcon(FluentIcons.Common.Symbol.Globe, Colors.DodgerBlue));
+            searchSettingsItem.Click += (s, e) => ShowSearchSettings();
+            settingsMenuItem.Items.Add(searchSettingsItem);
+            menuItems["SearchSettings"] = searchSettingsItem;
+
             // 全局分区设置菜单项
             var globalSettingsItem = CreateMenuItem("全局分区设置", IconUtil.CreateMenuItemIcon(FluentIcons.Common.Symbol.PaintBrush, Colors.DodgerBlue));
             globalSettingsItem.Click += (s, e) => ShowGlobalPartitionSettings();
             settingsMenuItem.Items.Add(globalSettingsItem);
             menuItems["GlobalPartitionSettings"] = globalSettingsItem;
+
+            // 快捷键设置菜单项
+            var hotkeyItem = CreateMenuItem("快捷键设置", IconUtil.CreateMenuItemIcon(FluentIcons.Common.Symbol.Keyboard, Colors.DodgerBlue));
+            hotkeyItem.Click += (s, e) => ShowHotkeySettings();
+            settingsMenuItem.Items.Add(hotkeyItem);
+            menuItems["HotkeySettings"] = hotkeyItem;
         }
 
         /// <summary>
@@ -181,6 +201,14 @@ namespace Layouter.Services
         }
 
         /// <summary>
+        /// 打开搜索设置面板（全盘搜索开关、最短字符数、索引重建、快捷键）
+        /// </summary>
+        private void ShowSearchSettings()
+        {
+            SearchSettingsWindow.ShowSettings();
+        }
+
+        /// <summary>
         /// 打开全局分区设置窗口
         /// </summary>
         private void ShowGlobalPartitionSettings()
@@ -206,8 +234,13 @@ namespace Layouter.Services
                 bool currentState = GeneralSettingsService.Instance.GetAutoStartEnabled();
                 bool newState = !currentState;
 
-                // 更新设置
-                GeneralSettingsService.Instance.SetAutoStartEnabled(newState);
+                // 更新设置，写入失败时保持原状并提示
+                if (!GeneralSettingsService.Instance.SetAutoStartEnabled(newState))
+                {
+                    TrayIconService.Instance.ShowBalloonTip("自启动设置",
+                        "写入启动项失败，请检查安全软件是否拦截了注册表写入", BalloonIcon.Error);
+                    return;
+                }
 
                 // 更新菜单项文本
                 menuItem.Header = newState ? "开启" : "停止";
@@ -373,6 +406,81 @@ namespace Layouter.Services
             {
                 Log.Information($"显示备份与还原窗口时出错: {ex.Message}");
                 AppMessageBox.Show($"显示备份与还原窗口时出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// 显示全局搜索窗口
+        /// </summary>
+        /// <remarks>
+        /// 搜索窗口是单例：已经打开时直接激活并聚焦搜索框，
+        /// 不会弹出第二个窗口。
+        /// </remarks>
+        public static void ShowGlobalSearch()
+        {
+            try
+            {
+                var window = SingletonWindowManager.Instance.ShowWindow<GlobalSearchWindow>(() => new GlobalSearchWindow(), false);
+                window?.FocusSearchBox();
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"显示全局搜索窗口时出错: {ex.Message}");
+                AppMessageBox.Show($"显示全局搜索窗口时出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// 打开快捷键设置窗口
+        /// </summary>
+        private void ShowHotkeySettings()
+        {
+            try
+            {
+                var settingsWindow = new HotkeySettingsWindow();
+                if (settingsWindow.ShowDialog() == true)
+                {
+                    // 保存后立即重新注册全局快捷键
+                    GlobalHotkeyService.RegisterConfiguredHotkeys();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"打开快捷键设置时出错: {ex.Message}");
+                AppMessageBox.Show($"打开快捷键设置时出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// 新建分区（供全局快捷键调用）
+        /// </summary>
+        public static void ShowNewPartition()
+        {
+            try
+            {
+                Instance.viewModel?.NewWindowCommand.Execute(null);
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"新建分区时出错: {ex.Message}");
+                AppMessageBox.Show($"新建分区时出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// 打开分区管理窗口（供全局快捷键调用）
+        /// </summary>
+        public static void ShowPartitionManager()
+        {
+            try
+            {
+                // 必须非模态：模态窗口会禁用本进程的所有窗口，桌面上的分区就没法操作了
+                SingletonWindowManager.Instance.ShowWindow<PartitionManagerWindow>(() => new PartitionManagerWindow(), false);
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"打开分区管理窗口时出错: {ex.Message}");
+                AppMessageBox.Show($"打开分区管理窗口时出错: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 

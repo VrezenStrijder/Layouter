@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.DependencyInjection;
 using Layouter.Logs;
 using Layouter.Models;
@@ -60,14 +61,109 @@ namespace Layouter
                 DesktopService.Instance.RegisterDesktopDoubleClickEvent();
             }
 
+            // 启用了全文件系统搜索时，后台预热本地文件索引
+            // （缓存缺失或过期才重建，已有缓存可秒级加载）
+            if (GeneralSettingsService.Instance.GetEnableFullFileSystemSearch())
+            {
+                LocalFileIndexService.Instance.StartEnsure();
+            }
+
             // 启动托盘图标
             TrayIconService.Instance.Initialize();
-            
-            // 初始化并加载插件
-            InitializePlugins();
 
-            // 尝试恢复上一次的分区配置
-            RestorePartitionsFromLastSession();
+            // 注册全局快捷键（搜索、新建分区、自动排列图标、分区管理）
+            RegisterHotkeys();
+
+            // 分区恢复与插件加载放到后台优先级执行：
+            // 托盘图标先出现，程序立刻可用，分区随后陆续显示出来，
+            // 整个过程界面不会卡住。
+            Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(StartupDeferredWork));
+        }
+
+        /// <summary>
+        /// 注册全局快捷键
+        /// </summary>
+        private void RegisterHotkeys()
+        {
+            try
+            {
+                GlobalHotkeyService.Instance.Triggered += (s, action) =>
+                {
+                    Dispatcher.BeginInvoke(new Action(() => ExecuteHotkeyAction(action)));
+                };
+
+                GlobalHotkeyService.RegisterConfiguredHotkeys();
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"注册全局快捷键失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 执行全局快捷键对应的功能
+        /// </summary>
+        private void ExecuteHotkeyAction(HotkeyAction action)
+        {
+            try
+            {
+                switch (action)
+                {
+                    case HotkeyAction.Search:
+                        TrayMenuService.ShowGlobalSearch();
+                        break;
+
+                    case HotkeyAction.AddPartition:
+                        TrayMenuService.ShowNewPartition();
+                        break;
+
+                    case HotkeyAction.ArrangeIcons:
+                        WindowManagerService.Instance.ArrangeAllPartitionsIcons();
+                        break;
+
+                    case HotkeyAction.PartitionManager:
+                        TrayMenuService.ShowPartitionManager();
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"执行全局快捷键功能失败({action}): {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 启动后的延迟工作：恢复分区、加载插件
+        /// </summary>
+        private async void StartupDeferredWork()
+        {
+            try
+            {
+                // 清理过期的图标磁盘缓存
+                IconDiskCache.TrimIfNeeded();
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"清理图标缓存时出错: {ex.Message}");
+            }
+
+            try
+            {
+                await PartitionDataService.Instance.RestoreWindowsAsync();
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"恢复分区配置失败: {ex.Message}");
+            }
+
+            try
+            {
+                InitializePlugins();
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"初始化插件失败: {ex.Message}");
+            }
         }
 
         private void ConfigureServices(IServiceCollection services)
@@ -107,22 +203,6 @@ namespace Layouter
             Log.CloseAndFlush();
 
             base.OnExit(e);
-        }
-
-        private void RestorePartitionsFromLastSession()
-        {
-            try
-            {
-                // 使用PartitionDataService恢复上次的分区配置
-                PartitionDataService.Instance.RestoreWindows();
-            }
-            catch (System.Exception ex)
-            {
-                Log.Information($"恢复分区配置失败: {ex.Message}");
-
-                var window = new DesktopManagerWindow();
-                window.Show();
-            }
         }
 
         private void SaveAllPartitions()
@@ -199,7 +279,7 @@ namespace Layouter
             try
             {
                 var pluginManager = serviceProvider.GetRequiredService<Plugins.PluginManager>();
-                
+
                 // 加载插件元数据并自动显示插件窗口
                 pluginManager.LoadPluginsMetadata(true);
 

@@ -115,6 +115,35 @@ namespace Layouter.Services
         }
 
         /// <summary>
+        /// 自动排列所有分区中的图标
+        /// </summary>
+        /// <remarks>
+        /// 供全局快捷键「自动排列图标」使用：
+        /// 逐个分区重新排布图标并保存布局，单个分区失败不影响其它分区。
+        /// </remarks>
+        public void ArrangeAllPartitionsIcons()
+        {
+            var windows = GetAllWindows();
+
+            foreach (var window in windows)
+            {
+                if (window == null)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    window.ArrangeIconsNow();
+                }
+                catch (Exception ex)
+                {
+                    Log.Information($"自动排列分区图标失败({window.WindowId}): {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>
         /// 对齐所有分区窗口
         /// </summary>
         public void ArrangeAllPartitionWindows()

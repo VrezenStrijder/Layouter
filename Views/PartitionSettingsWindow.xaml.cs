@@ -24,8 +24,15 @@ namespace Layouter.Views
         private SolidColorBrush originalContentBackground;
         private double originalTitleFontSize;
         private double originalOpacity;
+        private double originalInactiveOpacity;
+        private PartitionBackdrop originalBackdrop;
+        private double originalTintOpacity;
+        private Color? originalTintColorOverride;
         private IconSize originalIconSize;
         private double originalIconTextSize;
+
+        /// <summary>编辑中的自定义色调，null 表示跟随标题栏背景色</summary>
+        private Color? tintColorOverride;
 
         public PartitionSettingsWindow(DesktopManagerViewModel viewModel, bool isGlobalSettings = false)
         {
@@ -41,6 +48,10 @@ namespace Layouter.Views
             originalTitleAlignment = vm.TitleAlignment;
             originalTitleFontSize = vm.TitleFontSize;
             originalOpacity = vm.Opacity;
+            originalInactiveOpacity = vm.InactiveOpacity;
+            originalBackdrop = vm.Backdrop;
+            originalTintOpacity = vm.TintOpacity;
+            originalTintColorOverride = vm.TintColorOverride;
             originalIconSize = vm.IconSize;
             originalIconTextSize = vm.IconTextSize;
 
@@ -169,6 +180,8 @@ namespace Layouter.Views
 
             TitleFontSizeSlider.Value = Math.Min(Math.Max(preset.TitleFontSize, TitleFontSizeSlider.Minimum), TitleFontSizeSlider.Maximum);
             OpacitySlider.Value = Math.Min(Math.Max(preset.Opacity, OpacitySlider.Minimum), OpacitySlider.Maximum);
+            // 未选中状态沿用同一套比例，保持预设主题的整体观感一致
+            InactiveOpacitySlider.Value = Math.Min(Math.Max(OpacitySlider.Value * 0.7, InactiveOpacitySlider.Minimum), InactiveOpacitySlider.Maximum);
             TextSizeSlider.Value = Math.Min(Math.Max(preset.IconTextSize, TextSizeSlider.Minimum), TextSizeSlider.Maximum);
 
             switch (preset.IconSize)
@@ -196,6 +209,8 @@ namespace Layouter.Views
                     TitleAlignmentComboBox.SelectedIndex = 0;
                     break;
             }
+
+            RefreshTintPreview();
         }
 
         /// <summary>
@@ -249,6 +264,28 @@ namespace Layouter.Views
 
             // 设置透明度
             OpacitySlider.Value = vm.Opacity;
+            InactiveOpacitySlider.Value = vm.InactiveOpacity;
+
+            // 设置背景材质
+            switch (vm.Backdrop)
+            {
+                case PartitionBackdrop.Acrylic:
+                    BackdropComboBox.SelectedIndex = 1;
+                    break;
+                default:
+                    BackdropComboBox.SelectedIndex = 0;
+                    break;
+            }
+
+            TintOpacitySlider.Value = vm.TintOpacity;
+
+            // 自定义色调：null 时默认跟随标题栏
+            tintColorOverride = vm.TintColorOverride;
+            TintFollowTitleCheckBox.IsChecked = !tintColorOverride.HasValue;
+
+            UpdateTintColorControls();
+            BackdropComboBox_SelectionChanged(null, null);
+            RefreshTintPreview();
 
             // 设置图标大小
             switch (vm.IconSize)
@@ -296,6 +333,7 @@ namespace Layouter.Views
                 c.A = vm.TitleBaseAlpha;
 
                 TitleBackgroundPreview.Background = new SolidColorBrush(c);
+                RefreshTintPreview();
             }
 
         }
@@ -320,8 +358,169 @@ namespace Layouter.Views
             PreviewBorder.Opacity = OpacitySlider.Value;
         }
 
-        private void TitleFontSizeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        /// <summary>
+        /// 未选中状态下的透明度变化：同步右侧预览
+        /// </summary>
+        private void InactiveOpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
+            if (InactivePreviewBorder == null)
+            {
+                return;
+            }
+            InactivePreviewBorder.Opacity = InactiveOpacitySlider.Value;
+        }
+
+        /// <summary>
+        /// 背景材质变化：没有材质时把色调相关控件置灰
+        /// </summary>
+        private void BackdropComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (TintPreview == null)
+            {
+                return;
+            }
+
+            bool enabled = GetSelectedBackdrop() != PartitionBackdrop.None;
+
+            TintOpacitySlider.IsEnabled = enabled;
+            TintFollowTitleCheckBox.IsEnabled = enabled;
+            TintColorButton.IsEnabled = enabled && TintFollowTitleCheckBox.IsChecked == false;
+            TintPreview.Opacity = enabled ? 1.0 : 0.4;
+        }
+
+        /// <summary>
+        /// 色调浓度变化：同步色块预览
+        /// </summary>
+        private void TintOpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            RefreshTintPreview();
+        }
+
+        /// <summary>
+        /// 读取当前选中的背景材质
+        /// </summary>
+        private PartitionBackdrop GetSelectedBackdrop()
+        {
+            if (BackdropComboBox?.SelectedItem is ComboBoxItem item && item.Tag is string tag)
+            {
+                if (Enum.TryParse(tag, out PartitionBackdrop parsed))
+                {
+                    return parsed;
+                }
+            }
+
+            return PartitionBackdrop.None;
+        }
+
+        /// <summary>
+        /// 刷新色调预览：自定义色优先，否则跟随标题栏背景色
+        /// </summary>
+        /// <remarks>
+        /// 窗口还在 XAML 解析阶段时，下方的浓度滑块可能尚未创建，
+        /// 此时直接返回，等 InitializeUI 统一刷新。
+        /// </remarks>
+        private void RefreshTintPreview()
+        {
+            if (TintPreview == null || TitleBackgroundPreview == null || TintOpacitySlider == null)
+            {
+                return;
+            }
+
+            Color color = tintColorOverride ?? GetTitleBarColor();
+            TintPreview.Background = BuildTintBrush(color, TintOpacitySlider.Value);
+        }
+
+        /// <summary>
+        /// 读取标题栏预览颜色
+        /// </summary>
+        private Color GetTitleBarColor()
+        {
+            return TitleBackgroundPreview?.Background is SolidColorBrush brush
+                ? brush.Color
+                : Colors.DodgerBlue;
+        }
+
+        /// <summary>
+        /// 跟随标题栏开关变化
+        /// </summary>
+        private void TintFollowTitle_Changed(object sender, RoutedEventArgs e)
+        {
+            if (TintFollowTitleCheckBox == null)
+            {
+                return;
+            }
+
+            if (TintFollowTitleCheckBox.IsChecked == true)
+            {
+                // 恢复跟随：清除自定义色
+                tintColorOverride = null;
+            }
+            else if (!tintColorOverride.HasValue)
+            {
+                // 从跟随切换到自定义时，以当前标题栏颜色作为起点
+                tintColorOverride = GetTitleBarColor();
+            }
+
+            UpdateTintColorControls();
+            RefreshTintPreview();
+        }
+
+        /// <summary>
+        /// 选择自定义色调
+        /// </summary>
+        private void TintColorButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (TintFollowTitleCheckBox.IsChecked != false)
+            {
+                TintFollowTitleCheckBox.IsChecked = false;
+            }
+
+            Color current = tintColorOverride ?? GetTitleBarColor();
+
+            using (var colorDialog = new ColorDialog())
+            {
+                colorDialog.FullOpen = true;
+                colorDialog.Color = System.Drawing.Color.FromArgb(current.R, current.G, current.B);
+
+                if (colorDialog.ShowDialog() != System.Windows.Forms.DialogResult.OK)
+                {
+                    return;
+                }
+
+                tintColorOverride = Color.FromRgb(
+                    colorDialog.Color.R,
+                    colorDialog.Color.G,
+                    colorDialog.Color.B);
+
+                UpdateTintColorControls();
+                RefreshTintPreview();
+            }
+        }
+
+        /// <summary>
+        /// 按「是否跟随标题栏」更新选色按钮的可用状态
+        /// </summary>
+        private void UpdateTintColorControls()
+        {
+            if (TintColorButton == null || TintFollowTitleCheckBox == null)
+            {
+                return;
+            }
+
+            TintColorButton.IsEnabled = TintFollowTitleCheckBox.IsChecked != true;
+        }
+
+        /// <summary>
+        /// 生成色调预览用的画刷
+        /// </summary>
+        private static SolidColorBrush BuildTintBrush(Color color, double opacity)
+        {
+            double clamped = Math.Clamp(opacity, 0, 1);
+            byte alpha = (byte)Math.Round(clamped * 255);
+            return new SolidColorBrush(Color.FromArgb(alpha, color.R, color.G, color.B));
+        }
+
+        private void TitleFontSizeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)        {
             if (TitleFontSizeText != null)
             {
                 TitleFontSizeText.Text = e.NewValue.ToString("F1");
@@ -342,6 +541,13 @@ namespace Layouter.Views
             TitleFontSizeSlider.Value = 14d;
             TitleAlignmentComboBox.SelectedIndex = 0; // 左对齐
             OpacitySlider.Value = 0.90;
+            InactiveOpacitySlider.Value = 0.63;
+            BackdropComboBox.SelectedIndex = 0; // 无背景材质
+            TintOpacitySlider.Value = 0.05;
+            tintColorOverride = null;
+            TintFollowTitleCheckBox.IsChecked = true;
+            UpdateTintColorControls();
+            RefreshTintPreview();
             IconSizeComboBox.SelectedIndex = 1; // 中等大小
             TextSizeSlider.Value = 12;
         }
@@ -389,6 +595,12 @@ namespace Layouter.Views
 
             vm.TitleFontSize = TitleFontSizeSlider.Value;
             vm.Opacity = OpacitySlider.Value;
+            vm.InactiveOpacity = InactiveOpacitySlider.Value;
+
+            // 背景材质
+            vm.Backdrop = GetSelectedBackdrop();
+            vm.TintOpacity = TintOpacitySlider.Value;
+            vm.TintColorOverride = tintColorOverride;
 
             // 设置图标大小
             switch (IconSizeComboBox.SelectedIndex)
@@ -430,6 +642,10 @@ namespace Layouter.Views
             vm.TitleAlignment = originalTitleAlignment;
             vm.TitleFontSize = originalTitleFontSize;
             vm.Opacity = originalOpacity;
+            vm.InactiveOpacity = originalInactiveOpacity;
+            vm.Backdrop = originalBackdrop;
+            vm.TintOpacity = originalTintOpacity;
+            vm.TintColorOverride = originalTintColorOverride;
             vm.IconSize = originalIconSize;
             vm.IconTextSize = originalIconTextSize;
 
